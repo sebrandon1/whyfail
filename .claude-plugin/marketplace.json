@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "whyfail",
+  "description": "Prow CI context for Claude Code: job flakiness history and compact run digests.",
+  "owner": {
+    "name": "Brandon Palm"
+  },
+  "plugins": [
+    {
+      "name": "whyfail",
+      "description": "Job flakiness history and compact run digests for OpenShift Prow, with a PreToolUse hook that redirects Prow and GCS fetches to the whyfail CLI.",
+      "author": {
+        "name": "Brandon Palm"
+      },
+      "category": "development",
+      "source": "./plugin",
+      "homepage": "https://github.com/sebrandon1/whyfail"
+    }
+  ]
+}
