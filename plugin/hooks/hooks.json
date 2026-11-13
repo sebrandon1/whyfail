@@ -1,0 +1,25 @@
+{
+  "description": "Redirect Prow and CI artifact fetches to whyfail so Claude gets structured context instead of raw pages and multi-megabyte artifacts.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "whyfail hook bash"
+          }
+        ]
+      },
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "whyfail hook webfetch"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,498 @@
+{
+	"kind": "ProwJob",
+	"apiVersion": "prow.k8s.io/v1",
+	"metadata": {
+		"name": "6430bb65-c6e4-426e-828e-fd8264f60c2a",
+		"namespace": "ci",
+		"uid": "2b96a8bd-4d8e-4634-9bda-7fb41101ca47",
+		"resourceVersion": "8382924256",
+		"generation": 9,
+		"creationTimestamp": "2026-11-12T21:10:38Z",
+		"labels": {
+			"capability/intranet": "intranet",
+			"ci-operator.openshift.io/cloud": "equinix-edge-enablement",
+			"ci-operator.openshift.io/cloud-cluster-profile": "equinix-edge-enablement",
+			"ci.openshift.io/generator": "prowgen",
+			"created-by-prow": "true",
+			"event-GUID": "7e7bd760-dedd-11f1-836e-86c177f6beff",
+			"pj-rehearse.openshift.io/can-be-rehearsed": "true",
+			"prow.k8s.io/build-id": "2120987667142283264",
+			"prow.k8s.io/context": "baremetalds-sno-recert-cluster-rename",
+			"prow.k8s.io/id": "6430bb65-c6e4-426e-828e-fd8264f60c2a",
+			"prow.k8s.io/is-optional": "false",
+			"prow.k8s.io/job": "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cl",
+			"prow.k8s.io/refs.base_ref": "main",
+			"prow.k8s.io/refs.org": "rh-ecosystem-edge",
+			"prow.k8s.io/refs.pull": "2364",
+			"prow.k8s.io/refs.repo": "recert",
+			"prow.k8s.io/type": "presubmit"
+		},
+		"annotations": {
+			"prow.k8s.io/context": "ci/prow/baremetalds-sno-recert-cluster-rename",
+			"prow.k8s.io/job": "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename"
+		},
+		"managedFields": [
+			{
+				"manager": "hook",
+				"operation": "Update",
+				"apiVersion": "prow.k8s.io/v1",
+				"time": "2026-11-12T21:10:38Z",
+				"fieldsType": "FieldsV1",
+				"fieldsV1": {
+					"f:metadata": {
+						"f:annotations": {
+							".": {},
+							"f:prow.k8s.io/context": {},
+							"f:prow.k8s.io/job": {}
+						},
+						"f:labels": {
+							".": {},
+							"f:capability/intranet": {},
+							"f:ci-operator.openshift.io/cloud": {},
+							"f:ci-operator.openshift.io/cloud-cluster-profile": {},
+							"f:ci.openshift.io/generator": {},
+							"f:created-by-prow": {},
+							"f:event-GUID": {},
+							"f:pj-rehearse.openshift.io/can-be-rehearsed": {},
+							"f:prow.k8s.io/context": {},
+							"f:prow.k8s.io/is-optional": {},
+							"f:prow.k8s.io/job": {},
+							"f:prow.k8s.io/refs.base_ref": {},
+							"f:prow.k8s.io/refs.org": {},
+							"f:prow.k8s.io/refs.pull": {},
+							"f:prow.k8s.io/refs.repo": {},
+							"f:prow.k8s.io/type": {}
+						}
+					},
+					"f:spec": {
+						".": {},
+						"f:agent": {},
+						"f:cluster": {},
+						"f:context": {},
+						"f:decoration_config": {
+							".": {},
+							"f:censor_secrets": {},
+							"f:censoring_options": {
+								".": {},
+								"f:minimum_secret_length": {}
+							},
+							"f:gcs_configuration": {
+								".": {},
+								"f:bucket": {},
+								"f:compress_file_types": {},
+								"f:default_org": {},
+								"f:default_repo": {},
+								"f:mediaTypes": {
+									".": {},
+									"f:log": {}
+								},
+								"f:path_strategy": {}
+							},
+							"f:gcs_credentials_secret": {},
+							"f:grace_period": {},
+							"f:resources": {
+								".": {},
+								"f:clonerefs": {
+									".": {},
+									"f:limits": {
+										".": {},
+										"f:memory": {}
+									},
+									"f:requests": {
+										".": {},
+										"f:cpu": {},
+										"f:memory": {}
+									}
+								},
+								"f:initupload": {
+									".": {},
+									"f:limits": {
+										".": {},
+										"f:memory": {}
+									},
+									"f:requests": {
+										".": {},
+										"f:cpu": {},
+										"f:memory": {}
+									}
+								},
+								"f:place_entrypoint": {
+									".": {},
+									"f:limits": {
+										".": {},
+										"f:memory": {}
+									},
+									"f:requests": {
+										".": {},
+										"f:cpu": {},
+										"f:memory": {}
+									}
+								},
+								"f:sidecar": {
+									".": {},
+									"f:limits": {
+										".": {},
+										"f:memory": {}
+									},
+									"f:requests": {
+										".": {},
+										"f:cpu": {},
+										"f:memory": {}
+									}
+								}
+							},
+							"f:sparse_checkout_files": {},
+							"f:timeout": {},
+							"f:utility_images": {
+								".": {},
+								"f:clonerefs": {},
+								"f:entrypoint": {},
+								"f:initupload": {},
+								"f:sidecar": {}
+							}
+						},
+						"f:job": {},
+						"f:namespace": {},
+						"f:pod_spec": {
+							".": {},
+							"f:containers": {},
+							"f:serviceAccountName": {},
+							"f:volumes": {}
+						},
+						"f:prowjob_defaults": {
+							".": {},
+							"f:tenant_id": {}
+						},
+						"f:refs": {
+							".": {},
+							"f:base_link": {},
+							"f:base_ref": {},
+							"f:base_sha": {},
+							"f:org": {},
+							"f:pulls": {},
+							"f:repo": {},
+							"f:repo_link": {},
+							"f:sparse_checkout_files": {}
+						},
+						"f:report": {},
+						"f:rerun_command": {},
+						"f:type": {}
+					},
+					"f:status": {
+						".": {},
+						"f:startTime": {}
+					}
+				}
+			},
+			{
+				"manager": "crier",
+				"operation": "Update",
+				"apiVersion": "prow.k8s.io/v1",
+				"time": "2026-11-12T21:10:49Z",
+				"fieldsType": "FieldsV1",
+				"fieldsV1": {
+					"f:status": {
+						"f:prev_report_states": {
+							".": {},
+							"f:gcsk8sreporter": {},
+							"f:gcsreporter": {},
+							"f:github-reporter": {}
+						}
+					}
+				}
+			},
+			{
+				"manager": "prow-controller-manager",
+				"operation": "Update",
+				"apiVersion": "prow.k8s.io/v1",
+				"time": "2026-11-12T23:24:30Z",
+				"fieldsType": "FieldsV1",
+				"fieldsV1": {
+					"f:metadata": {
+						"f:labels": {
+							"f:prow.k8s.io/build-id": {},
+							"f:prow.k8s.io/id": {}
+						}
+					},
+					"f:status": {
+						"f:build_id": {},
+						"f:completionTime": {},
+						"f:description": {},
+						"f:pendingTime": {},
+						"f:pod_name": {},
+						"f:state": {},
+						"f:url": {}
+					}
+				}
+			}
+		]
+	},
+	"spec": {
+		"type": "presubmit",
+		"agent": "kubernetes",
+		"cluster": "build10",
+		"namespace": "ci",
+		"job": "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename",
+		"refs": {
+			"org": "rh-ecosystem-edge",
+			"repo": "recert",
+			"repo_link": "https://github.com/rh-ecosystem-edge/recert",
+			"base_ref": "main",
+			"base_sha": "a141b53547c0c18c927ba6fdd4b9d41b4b4670ce",
+			"base_link": "https://github.com/rh-ecosystem-edge/recert/commit/a141b53547c0c18c927ba6fdd4b9d41b4b4670ce",
+			"pulls": [
+				{
+					"number": 2364,
+					"author": "sebrandon1",
+					"sha": "ab06778052ae97e8fe273e137dffd25025e72ee0",
+					"title": "CNF-30065: add integration scenarios for cluster customizations and fix the defects they exposed",
+					"head_ref": "CNF-30065-integration-test-gaps",
+					"link": "https://github.com/rh-ecosystem-edge/recert/pull/2364",
+					"commit_link": "https://github.com/rh-ecosystem-edge/recert/pull/2364/commits/ab06778052ae97e8fe273e137dffd25025e72ee0",
+					"author_link": "https://github.com/sebrandon1"
+				}
+			],
+			"sparse_checkout_files": [
+				"Dockerfile",
+				"Dockerfile.prow"
+			]
+		},
+		"report": true,
+		"context": "ci/prow/baremetalds-sno-recert-cluster-rename",
+		"rerun_command": "/test baremetalds-sno-recert-cluster-rename",
+		"pod_spec": {
+			"volumes": [
+				{
+					"name": "boskos",
+					"secret": {
+						"secretName": "boskos-credentials",
+						"items": [
+							{
+								"key": "credentials",
+								"path": "credentials"
+							}
+						]
+					}
+				},
+				{
+					"name": "ci-pull-credentials",
+					"secret": {
+						"secretName": "ci-pull-credentials"
+					}
+				},
+				{
+					"name": "gsm-config",
+					"configMap": {
+						"name": "gsm-config"
+					}
+				},
+				{
+					"name": "gsm-sa-key",
+					"csi": {
+						"driver": "secrets-store.csi.k8s.io",
+						"readOnly": true,
+						"volumeAttributes": {
+							"secretProviderClass": "ci-operator-sa-key-spc"
+						}
+					}
+				},
+				{
+					"name": "manifest-tool-local-pusher",
+					"secret": {
+						"secretName": "manifest-tool-local-pusher"
+					}
+				},
+				{
+					"name": "pull-secret",
+					"secret": {
+						"secretName": "registry-pull-credentials"
+					}
+				},
+				{
+					"name": "result-aggregator",
+					"secret": {
+						"secretName": "result-aggregator"
+					}
+				}
+			],
+			"containers": [
+				{
+					"name": "",
+					"image": "quay-proxy.ci.openshift.org/openshift/ci:ci_ci-operator_latest",
+					"command": [
+						"ci-operator"
+					],
+					"args": [
+						"--enable-secrets-store-csi-driver=true",
+						"--gcs-upload-secret=/secrets/gcs/service-account.json",
+						"--gsm-config=/etc/gsm-config/gsm-config.yaml",
+						"--gsm-credentials-file=/etc/gsm-credentials/key.json",
+						"--gsm-project-config=/etc/gsm-config/gsm-project-config.yaml",
+						"--image-import-pull-secret=/etc/pull-secret/.dockerconfigjson",
+						"--lease-server-credentials-file=/etc/boskos/credentials",
+						"--report-credentials-file=/etc/report/credentials",
+						"--secret-dir=/secrets/ci-pull-credentials",
+						"--target=baremetalds-sno-recert-cluster-rename"
+					],
+					"ports": [
+						{
+							"name": "http",
+							"containerPort": 8080
+						}
+					],
+					"env": [
+						{
+							"name": "HTTP_SERVER_IP",
+							"valueFrom": {
+								"fieldRef": {
+									"fieldPath": "status.podIP"
+								}
+							}
+						}
+					],
+					"resources": {
+						"requests": {
+							"cpu": "10m"
+						}
+					},
+					"volumeMounts": [
+						{
+							"name": "boskos",
+							"readOnly": true,
+							"mountPath": "/etc/boskos"
+						},
+						{
+							"name": "ci-pull-credentials",
+							"readOnly": true,
+							"mountPath": "/secrets/ci-pull-credentials"
+						},
+						{
+							"name": "gcs-credentials",
+							"readOnly": true,
+							"mountPath": "/secrets/gcs"
+						},
+						{
+							"name": "gsm-config",
+							"readOnly": true,
+							"mountPath": "/etc/gsm-config"
+						},
+						{
+							"name": "gsm-sa-key",
+							"readOnly": true,
+							"mountPath": "/etc/gsm-credentials"
+						},
+						{
+							"name": "manifest-tool-local-pusher",
+							"readOnly": true,
+							"mountPath": "/secrets/manifest-tool"
+						},
+						{
+							"name": "pull-secret",
+							"readOnly": true,
+							"mountPath": "/etc/pull-secret"
+						},
+						{
+							"name": "result-aggregator",
+							"readOnly": true,
+							"mountPath": "/etc/report"
+						}
+					],
+					"imagePullPolicy": "Always"
+				}
+			],
+			"serviceAccountName": "ci-operator"
+		},
+		"decoration_config": {
+			"timeout": "8h0m0s",
+			"grace_period": "1h0m0s",
+			"utility_images": {
+				"clonerefs": "us-docker.pkg.dev/k8s-infra-prow/images/clonerefs:v20261107-86b2c4908",
+				"initupload": "us-docker.pkg.dev/k8s-infra-prow/images/initupload:v20261107-86b2c4908",
+				"entrypoint": "us-docker.pkg.dev/k8s-infra-prow/images/entrypoint:v20261107-86b2c4908",
+				"sidecar": "us-docker.pkg.dev/k8s-infra-prow/images/sidecar:v20261107-86b2c4908"
+			},
+			"resources": {
+				"clonerefs": {
+					"limits": {
+						"memory": "3Gi"
+					},
+					"requests": {
+						"cpu": "100m",
+						"memory": "500Mi"
+					}
+				},
+				"initupload": {
+					"limits": {
+						"memory": "200Mi"
+					},
+					"requests": {
+						"cpu": "100m",
+						"memory": "50Mi"
+					}
+				},
+				"place_entrypoint": {
+					"limits": {
+						"memory": "100Mi"
+					},
+					"requests": {
+						"cpu": "100m",
+						"memory": "25Mi"
+					}
+				},
+				"sidecar": {
+					"limits": {
+						"memory": "2Gi"
+					},
+					"requests": {
+						"cpu": "100m",
+						"memory": "250Mi"
+					}
+				}
+			},
+			"gcs_configuration": {
+				"bucket": "test-platform-results-public",
+				"path_strategy": "single",
+				"default_org": "openshift",
+				"default_repo": "origin",
+				"mediaTypes": {
+					"log": "text/plain"
+				},
+				"compress_file_types": [
+					"txt",
+					"log",
+					"json",
+					"tar",
+					"html",
+					"yaml"
+				]
+			},
+			"gcs_credentials_secret": "gce-sa-credentials-gcs-publisher",
+			"sparse_checkout_files": [
+				"Dockerfile",
+				"Dockerfile.prow"
+			],
+			"censor_secrets": true,
+			"censoring_options": {
+				"minimum_secret_length": 6
+			}
+		},
+		"prowjob_defaults": {
+			"tenant_id": "GlobalDefaultID"
+		}
+	},
+	"status": {
+		"startTime": "2026-11-12T21:10:38Z",
+		"pendingTime": "2026-11-12T21:10:41Z",
+		"completionTime": "2026-11-12T23:24:30Z",
+		"state": "failure",
+		"description": "Job failed.",
+		"url": "https://prow.ci.openshift.org/view/gs/test-platform-results-public/pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename/2120987667142283264",
+		"pod_name": "6430bb65-c6e4-426e-828e-fd8264f60c2a",
+		"build_id": "2120987667142283264",
+		"prev_report_states": {
+			"gcsk8sreporter": "pending",
+			"gcsreporter": "pending",
+			"github-reporter": "pending"
+		}
+	}
+}

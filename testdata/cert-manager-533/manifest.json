@@ -1,0 +1,56 @@
+{
+  "captured": "2026-11-13",
+  "note": "stored == GCS listing size; raw == decompressed/served size",
+  "objects": [
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/openshift_cert-manager-operator/533/pull-ci-openshift-cert-manager-operator-master-e2e-operator/2121292213823475712/prowjob.json",
+      "raw": 12828,
+      "sha256": "b107a8987644beb1201ef97a79e91c0dc6a92fbd33bd00e771282cc5ce94f1b7",
+      "stored": 12828
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/openshift_cert-manager-operator/533/pull-ci-openshift-cert-manager-operator-master-e2e-operator/2121292213823475712/finished.json",
+      "raw": 467,
+      "sha256": "db1e00e81f14fceb4a451f97c475e771b8a2c8767d0c3af4f51d84635c0b157d",
+      "stored": 467
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/openshift_cert-manager-operator/533/pull-ci-openshift-cert-manager-operator-master-e2e-operator/2121292213823475712/artifacts/ci-operator-step-graph.json",
+      "raw": 1927455,
+      "sha256": "a04235510281d59e3fa7c7c58ae217c426d2a434f8cc8b95cfc0dc3759337fb0",
+      "stored": 249486
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/openshift_cert-manager-operator/533/pull-ci-openshift-cert-manager-operator-master-e2e-operator/2121292213823475712/artifacts/junit_operator.xml",
+      "raw": 9386,
+      "sha256": "64469f866556c099c75dde0219c9584e7cecf79969f727bfee5527fa510e5d58",
+      "stored": 9386
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/openshift_cert-manager-operator/533/pull-ci-openshift-cert-manager-operator-master-e2e-operator/2121292213823475712/build-log.txt",
+      "raw": 314154,
+      "sha256": "137f1fc3a0365a5c23d26a218d6aede194751323e55ec6ede2ebd607fb2c6d7b",
+      "stored": 27599
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/openshift_cert-manager-operator/533/pull-ci-openshift-cert-manager-operator-master-e2e-operator/2121292213823475712/artifacts/ci-operator-metrics.json",
+      "raw": 96265,
+      "sha256": "f164609baf05e5713a5f1a3040f4beb88ba96843ffeff55ce89a33019de5b853",
+      "stored": 10697
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/openshift_cert-manager-operator/533/pull-ci-openshift-cert-manager-operator-master-e2e-operator/2121292213823475712/artifacts/e2e-operator/test/artifacts/junit.xml",
+      "raw": 338276,
+      "sha256": "9023b608eb06e121ad411ec3db9b14666ccfb9b996ca5cbf681accb589783c26",
+      "stored": 338276
+    }
+  ],
+  "source": "https://github.com/openshift/cert-manager-operator/pull/533"
+}

@@ -1,0 +1,828 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/sebrandon1/whyfail/internal/enrich"
+	"github.com/sebrandon1/whyfail/internal/gcs"
+	"github.com/sebrandon1/whyfail/internal/health"
+	"github.com/sebrandon1/whyfail/internal/hook"
+	"github.com/sebrandon1/whyfail/internal/prow"
+	"github.com/sebrandon1/whyfail/internal/render"
+	"github.com/sebrandon1/whyfail/internal/run"
+	"github.com/sebrandon1/whyfail/internal/stats"
+)
+
+var version = "dev"
+
+type globals struct {
+	jsonOut       bool
+	noStats       bool
+	cacheDir      string
+	refresh       bool
+	window        time.Duration
+	bytesPerToken int
+	baseline      time.Duration
+	bucket        string
+}
+
+func main() {
+	g := &globals{bytesPerToken: 4, baseline: 10 * time.Minute}
+	root := &cobra.Command{
+		Use:           "whyfail",
+		Short:         "Prow CI context for humans and Claude Code",
+		Version:       version,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	root.PersistentFlags().BoolVar(&g.jsonOut, "json", false, "emit JSON instead of human output")
+	root.PersistentFlags().BoolVar(&g.noStats, "no-stats", false, "do not record invocation statistics")
+	root.PersistentFlags().StringVar(&g.cacheDir, "cache-dir", "", "cache directory (default: user cache dir)")
+	root.PersistentFlags().BoolVar(&g.refresh, "refresh", false, "ignore cached listings and objects")
+	root.PersistentFlags().DurationVar(&g.window, "window", 0, "history window (e.g. 720h); 0 = all retained")
+	root.PersistentFlags().StringVar(&g.bucket, "bucket", prow.PublicBucket, "GCS bucket for job history")
+	root.PersistentFlags().IntVar(&g.bytesPerToken, "bytes-per-token", 4, "bytes per token estimate for gain")
+	root.PersistentFlags().DurationVar(&g.baseline, "baseline", 10*time.Minute, "modelled manual time per call for gain")
+
+	root.AddCommand(
+		newRunCmd(g), newJobCmd(g), newFailuresCmd(g), newLogCmd(g), newArtifactCmd(g),
+		newSearchCmd(g), newGainCmd(g), newHookCmd(), newDoctorCmd(g), newPRCmd(g), newMCPCmd(g),
+	)
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "whyfail:", err)
+		os.Exit(1)
+	}
+}
+
+func newClient(g *globals) *gcs.Client {
+	dir := g.cacheDir
+	if dir == "" {
+		dir = stats.Dir()
+	}
+	c := gcs.New(dir)
+	c.Refresh = g.refresh
+	return c
+}
+
+// emit writes the rendered output and records one stats entry.
+func (g *globals) emit(buf *bytes.Buffer, rec stats.Record, c *gcs.Client, start time.Time) {
+	_, _ = os.Stdout.Write(buf.Bytes())
+	if g.noStats || !stats.Enabled() {
+		return
+	}
+	rec.TS = time.Now().UTC()
+	rec.EmittedBytes = int64(buf.Len())
+	if c != nil {
+		rec.ReadBytes = c.ServedBytes
+		rec.NetworkBytes = c.NetworkBytes
+		rec.CacheHits = c.CacheHits
+		rec.Missing = c.Missing
+	}
+	rec.WallMS = time.Since(start).Milliseconds()
+	_ = stats.Append(rec)
+}
+
+func writeJSON(buf *bytes.Buffer, v any) {
+	enc := json.NewEncoder(buf)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(v)
+}
+
+// ---------- run ----------
+
+func newRunCmd(g *globals) *cobra.Command {
+	var noHistory, search bool
+	var noSippy bool
+	cmd := &cobra.Command{
+		Use:   "run <prow-url | gs://bucket/path>",
+		Short: "Digest a single Prow job run",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ref, err := prow.ParseRef(args[0])
+			if err != nil {
+				return err
+			}
+			ctx := context.Background()
+			c := newClient(g)
+			start := time.Now()
+
+			d, err := run.Build(ctx, c, ref, run.Options{History: !noHistory})
+			if err != nil {
+				return err
+			}
+
+			sig := &run.Signals{}
+			if !noSippy {
+				sig.Sippy = enrich.SippyStatus(ctx, c.HTTP, ref.RunID)
+			}
+			if search {
+				if q := topSignature(d); q != "" {
+					if res, err := enrich.SearchCI(ctx, c.HTTP, q, "48h"); err == nil {
+						sig.SearchCI = &run.SearchSig{Query: q, Matches48h: res.Matches, KnownBug: res.KnownBug}
+					}
+				}
+			}
+			if sig.Sippy != "" || sig.SearchCI != nil {
+				d.Signals = sig
+			}
+
+			var buf bytes.Buffer
+			if g.jsonOut {
+				writeJSON(&buf, d)
+			} else {
+				render.Digest(&buf, d)
+			}
+			rec := stats.Record{Cmd: "run", Target: ref.Job + "/" + ref.RunID}
+			if d.Artifacts != nil {
+				rec.InventoryBytes = d.Artifacts.TotalBytes
+			}
+			if d.Run.PR != nil {
+				rec.Repo = d.Run.PR.Org + "/" + d.Run.PR.Repo
+			}
+			if d.Job != nil && d.Job.Health != nil {
+				rec.Verdict = string(d.Job.Health.Verdict)
+			}
+			g.emit(&buf, rec, c, start)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&noHistory, "no-history", false, "skip job history (faster)")
+	cmd.Flags().BoolVar(&search, "search", false, "look up the top failure signature on search.ci")
+	cmd.Flags().BoolVar(&noSippy, "no-sippy", false, "skip the Sippy coverage probe")
+	return cmd
+}
+
+func topSignature(d *run.Digest) string {
+	if d.Tests != nil {
+		for _, f := range d.Tests.Failed {
+			if f.Blocking {
+				return f.Name
+			}
+		}
+		if len(d.Tests.Failed) > 0 {
+			return d.Tests.Failed[0].Name
+		}
+		if len(d.Tests.Monitors) > 0 {
+			if s := d.Tests.Monitors[0].Signature; s != "" {
+				return s
+			}
+			return d.Tests.Monitors[0].Name
+		}
+	}
+	if d.Run != nil && len(d.Run.Steps.Failed) > 0 {
+		return d.Run.Steps.Failed[0].Name
+	}
+	return ""
+}
+
+// ---------- job ----------
+
+func newJobCmd(g *globals) *cobra.Command {
+	return &cobra.Command{
+		Use:   "job <job-name>",
+		Short: "Job health over retained Prow history",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			c := newClient(g)
+			start := time.Now()
+			sum, err := health.Collect(ctx, c, g.bucket, args[0], g.window)
+			if err != nil {
+				return err
+			}
+			var buf bytes.Buffer
+			if g.jsonOut {
+				writeJSON(&buf, sum)
+			} else {
+				render.Job(&buf, sum)
+			}
+			g.emit(&buf, stats.Record{Cmd: "job", Target: args[0], Verdict: string(sum.Verdict)}, c, start)
+			return nil
+		},
+	}
+}
+
+// ---------- failures ----------
+
+func newFailuresCmd(g *globals) *cobra.Command {
+	return &cobra.Command{
+		Use:   "failures <prow-url>",
+		Short: "Failed tests and steps only",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ref, err := prow.ParseRef(args[0])
+			if err != nil {
+				return err
+			}
+			ctx := context.Background()
+			c := newClient(g)
+			start := time.Now()
+			d, err := run.Build(ctx, c, ref, run.Options{History: false})
+			if err != nil {
+				return err
+			}
+			out := struct {
+				Run    *run.RunInfo  `json:"run"`
+				Tests  *run.Tests    `json:"tests,omitempty"`
+				Failed []run.StepRef `json:"failed_steps,omitempty"`
+			}{Run: d.Run, Tests: d.Tests, Failed: d.Run.Steps.Failed}
+
+			var buf bytes.Buffer
+			if g.jsonOut {
+				writeJSON(&buf, out)
+			} else {
+				fmt.Fprintf(&buf, "%s %s\n", d.Run.JobName, strings.ToUpper(d.Run.Result))
+				for _, s := range out.Failed {
+					fmt.Fprintf(&buf, "  step FAILED  %s (%s)\n", s.Name, render.FormatDuration(s.DurationS))
+				}
+				if d.Tests != nil {
+					for _, f := range d.Tests.Failed {
+						label := "inform"
+						if f.Blocking {
+							label = "BLOCK"
+						}
+						fmt.Fprintf(&buf, "  %s  %s\n", label, f.Name)
+						if f.Error != "" {
+							fmt.Fprintf(&buf, "         %s\n", strings.SplitN(f.Error, "\n", 2)[0])
+						}
+					}
+					for _, f := range d.Tests.Monitors {
+						fmt.Fprintf(&buf, "  monitor  %s\n", f.Name)
+					}
+				}
+			}
+			g.emit(&buf, stats.Record{Cmd: "failures", Target: ref.Job + "/" + ref.RunID}, c, start)
+			return nil
+		},
+	}
+}
+
+// ---------- log ----------
+
+func newLogCmd(g *globals) *cobra.Command {
+	var tail int
+	cmd := &cobra.Command{
+		Use:   "log <prow-url> <step> [--tail N]",
+		Short: "Bounded view of a step's build log",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ref, err := prow.ParseRef(args[0])
+			if err != nil {
+				return err
+			}
+			step := args[1]
+			ctx := context.Background()
+			c := newClient(g)
+			start := time.Now()
+
+			objs, err := c.List(ctx, ref.Bucket, ref.ObjectPath+"/")
+			if err != nil {
+				return err
+			}
+			target := ""
+			for _, o := range objs {
+				switch {
+				case step == "job" && o.Name == ref.ObjectPath+"/build-log.txt":
+					target = o.Name
+				case step != "job" && strings.Contains(o.Name, "/"+step+"/build-log.txt"):
+					target = o.Name
+				}
+				if target != "" {
+					break
+				}
+			}
+			if target == "" {
+				return fmt.Errorf("no build-log.txt found for step %q", step)
+			}
+			data, err := c.GetLimit(ctx, ref.Bucket, target, 8<<20)
+			if err != nil {
+				return err
+			}
+			lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+			if tail > 0 && len(lines) > tail {
+				lines = lines[len(lines)-tail:]
+			}
+			out := strings.Join(lines, "\n") + "\n"
+
+			var buf bytes.Buffer
+			if g.jsonOut {
+				writeJSON(&buf, map[string]any{"artifact": target, "lines": len(lines), "text": out})
+			} else {
+				buf.WriteString(out)
+			}
+			g.emit(&buf, stats.Record{Cmd: "log", Target: target}, c, start)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&tail, "tail", 120, "number of trailing lines")
+	return cmd
+}
+
+// ---------- artifact ----------
+
+func newArtifactCmd(g *globals) *cobra.Command {
+	var list bool
+	cmd := &cobra.Command{
+		Use:   "artifact <gcs-url | gs://bucket/object>",
+		Short: "Metadata and a bounded excerpt for a GCS artifact",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bucket, object, err := prow.ParseArtifactURL(args[0])
+			if err != nil {
+				return err
+			}
+			ctx := context.Background()
+			c := newClient(g)
+			start := time.Now()
+
+			if list || strings.HasSuffix(object, "/") {
+				objs, err := c.List(ctx, bucket, object)
+				if err != nil {
+					return err
+				}
+				var buf bytes.Buffer
+				var total int64
+				for _, o := range objs {
+					total += o.Size
+					fmt.Fprintf(&buf, "%10s  %s\n", render.FormatBytes(o.Size), o.Name)
+				}
+				fmt.Fprintf(&buf, "%d objects, %s total\n", len(objs), render.FormatBytes(total))
+				g.emit(&buf, stats.Record{Cmd: "artifact-list", Target: object, InventoryBytes: total}, c, start)
+				return nil
+			}
+
+			meta, statErr := c.Stat(ctx, bucket, object)
+			if statErr != nil && statErr != gcs.ErrNotFound {
+				return statErr
+			}
+
+			isLog := path.Base(object) == "build-log.txt"
+			const maxExcerpt = 64 << 10
+			data, err := c.GetLimit(ctx, bucket, object, maxExcerpt)
+			if err != nil {
+				return err
+			}
+
+			var buf bytes.Buffer
+			metaOut := map[string]any{
+				"object":       object,
+				"size":         meta.Size,
+				"content_type": meta.ContentType,
+				"updated":      meta.Updated,
+			}
+			if g.jsonOut {
+				excerpt := string(data)
+				if isLog {
+					lines := strings.Split(strings.TrimRight(excerpt, "\n"), "\n")
+					if len(lines) > 120 {
+						lines = lines[len(lines)-120:]
+					}
+					excerpt = strings.Join(lines, "\n")
+				}
+				metaOut["excerpt"] = excerpt
+				metaOut["truncated"] = meta.Size > int64(len(data))
+				writeJSON(&buf, metaOut)
+			} else {
+				fmt.Fprintf(&buf, "%s\n  size: %s\n  type: %s\n  updated: %s\n", object,
+					render.FormatBytes(meta.Size), meta.ContentType, meta.Updated)
+				if isLog {
+					lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+					if len(lines) > 120 {
+						lines = lines[len(lines)-120:]
+					}
+					buf.WriteString("\n--- tail ---\n")
+					buf.WriteString(strings.Join(lines, "\n"))
+					buf.WriteString("\n")
+				} else if len(data) > 0 && isText(data) {
+					buf.WriteString("\n--- excerpt ---\n")
+					buf.Write(data)
+					if meta.Size > int64(len(data)) {
+						fmt.Fprintf(&buf, "\n... (%s truncated at %s)\n", render.FormatBytes(meta.Size), render.FormatBytes(maxExcerpt))
+					}
+				}
+			}
+			g.emit(&buf, stats.Record{Cmd: "artifact", Target: object, InventoryBytes: meta.Size}, c, start)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&list, "list", false, "list a prefix instead of reading an object")
+	return cmd
+}
+
+func isText(b []byte) bool {
+	for _, c := range b {
+		if c == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// ---------- search ----------
+
+func newSearchCmd(g *globals) *cobra.Command {
+	var maxAge string
+	cmd := &cobra.Command{
+		Use:   "search <regex>",
+		Short: "Count matching runs on search.ci",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			c := newClient(g)
+			start := time.Now()
+			res, err := enrich.SearchCI(ctx, c.HTTP, args[0], maxAge)
+			if err != nil {
+				return err
+			}
+			var buf bytes.Buffer
+			if g.jsonOut {
+				writeJSON(&buf, res)
+			} else {
+				fmt.Fprintf(&buf, "%d matching jobs in the last %s\n", res.Matches, maxAge)
+				for i, j := range res.Jobs {
+					if i >= 10 {
+						fmt.Fprintf(&buf, "  ... and %d more\n", len(res.Jobs)-10)
+						break
+					}
+					fmt.Fprintf(&buf, "  %s\n", j)
+				}
+				if res.KnownBug != "" {
+					fmt.Fprintf(&buf, "known bug referenced: %s\n", res.KnownBug)
+				}
+			}
+			g.emit(&buf, stats.Record{Cmd: "search", Target: args[0]}, c, start)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&maxAge, "max-age", "48h", "search window")
+	return cmd
+}
+
+// ---------- gain ----------
+
+func newGainCmd(g *globals) *cobra.Command {
+	var since string
+	var by string
+	var history bool
+	cmd := &cobra.Command{
+		Use:     "gain",
+		Aliases: []string{"stats", "saved"},
+		Short:   "Savings statistics (bytes, tokens, time)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			recs, err := stats.Load()
+			if err != nil {
+				return err
+			}
+			var cutoff time.Time
+			if since != "" {
+				d, err := parseSince(since)
+				if err != nil {
+					return err
+				}
+				cutoff = time.Now().Add(-d)
+			}
+			agg := stats.Summarize(recs, by, cutoff)
+			var buf bytes.Buffer
+			if history {
+				start := len(recs) - 20
+				if start < 0 {
+					start = 0
+				}
+				for _, r := range recs[start:] {
+					fmt.Fprintf(&buf, "%s  %-8s %10s → %8s  %s\n",
+						r.TS.Format("2006-01-02 15:04"), r.Cmd,
+						render.FormatBytes(r.ReadBytes), render.FormatBytes(r.EmittedBytes), r.Target)
+				}
+				_, _ = os.Stdout.Write(buf.Bytes())
+				return nil
+			}
+			if g.jsonOut {
+				writeJSON(&buf, agg)
+			} else {
+				render.Gain(&buf, agg, g.bytesPerToken, g.baseline)
+			}
+			_, _ = os.Stdout.Write(buf.Bytes())
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&since, "since", "", "only count calls newer than this (e.g. 7d, 24h)")
+	cmd.Flags().StringVar(&by, "by", "", "group by: cmd or repo")
+	cmd.Flags().BoolVar(&history, "history", false, "show recent calls")
+	return cmd
+}
+
+func parseSince(s string) (time.Duration, error) {
+	if d, err := time.ParseDuration(s); err == nil {
+		return d, nil
+	}
+	if strings.HasSuffix(s, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err == nil {
+			return time.Duration(n) * 24 * time.Hour, nil
+		}
+	}
+	return 0, fmt.Errorf("invalid --since %q", s)
+}
+
+// ---------- hook ----------
+
+func newHookCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "hook <bash|webfetch>",
+		Short:  "Claude Code PreToolUse hook entrypoint",
+		Args:   cobra.ExactArgs(1),
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return hook.Handle(args[0], os.Stdin, os.Stdout)
+		},
+	}
+}
+
+// ---------- doctor ----------
+
+func newDoctorCmd(g *globals) *cobra.Command {
+	return &cobra.Command{
+		Use:   "doctor",
+		Short: "Check binary, cache, stats, and endpoint reachability",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := newClient(g)
+
+			fmt.Printf("version:   %s\n", version)
+			fmt.Printf("cache:     %s\n", c.CacheDir)
+			fmt.Printf("stats:     %s (enabled=%v)\n", stats.Path(), stats.Enabled())
+			if p, err := exec.LookPath("whyfail"); err == nil {
+				fmt.Printf("binary:    %s\n", p)
+			} else {
+				fmt.Println("binary:    not on PATH (hooks will fail)")
+			}
+
+			ctx1, cancel1 := context.WithTimeout(context.Background(), 8*time.Second)
+			if _, err := c.ListLimit(ctx1, g.bucket, "pr-logs/directory/", 5); err == nil {
+				fmt.Println("gcs:       ok")
+			} else {
+				fmt.Printf("gcs:       FAILED: %v\n", err)
+			}
+			cancel1()
+
+			ctx2, cancel2 := context.WithTimeout(context.Background(), 8*time.Second)
+			if s := enrich.SippyStatus(ctx2, c.HTTP, "0"); s == "unknown" {
+				fmt.Println("sippy:     unreachable or unexpected response")
+			} else {
+				fmt.Printf("sippy:     ok (%s)\n", s)
+			}
+			cancel2()
+
+			ctx3, cancel3 := context.WithTimeout(context.Background(), 10*time.Second)
+			if _, err := enrich.SearchCI(ctx3, c.HTTP, "whyfail-doctor-probe", "1h"); err == nil {
+				fmt.Println("search.ci: ok")
+			} else {
+				fmt.Printf("search.ci: FAILED: %v\n", err)
+			}
+			cancel3()
+			return nil
+		},
+	}
+}
+
+// ---------- pr ----------
+
+var prURLRe = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$`)
+
+func newPRCmd(g *globals) *cobra.Command {
+	return &cobra.Command{
+		Use:   "pr <github-pr-url>",
+		Short: "Health of every failing check on a PR's head commit",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			m := prURLRe.FindStringSubmatch(args[0])
+			if m == nil {
+				return fmt.Errorf("not a GitHub PR URL: %s", args[0])
+			}
+			org, repo, num := m[1], m[2], m[3]
+			if _, err := exec.LookPath("gh"); err != nil {
+				return fmt.Errorf("the pr command needs the gh CLI for GitHub access")
+			}
+			ctx := context.Background()
+			c := newClient(g)
+			start := time.Now()
+
+			meta, err := ghJSON("repos/" + org + "/" + repo + "/pulls/" + num)
+			if err != nil {
+				return err
+			}
+			sha := stringField(meta, "head", "sha")
+			base := stringField(meta, "base", "ref")
+			title, _ := meta["title"].(string)
+			if sha == "" {
+				return fmt.Errorf("could not read head SHA for %s", args[0])
+			}
+
+			checks, err := ghGet("repos/" + org + "/" + repo + "/commits/" + sha + "/statuses?per_page=100")
+			if err != nil {
+				return err
+			}
+			var statuses []struct {
+				Context string `json:"context"`
+				State   string `json:"state"`
+			}
+			if err := json.Unmarshal(checks, &statuses); err != nil {
+				return err
+			}
+
+			type card struct {
+				Check  string          `json:"check"`
+				Job    string          `json:"job"`
+				Health *health.Summary `json:"health"`
+			}
+			var cards []card
+			seen := map[string]bool{}
+			for _, s := range statuses {
+				// Statuses are returned newest first; keep the latest per context.
+				if seen[s.Context] {
+					continue
+				}
+				seen[s.Context] = true
+				if s.State != "failure" && s.State != "error" {
+					continue
+				}
+				test := strings.TrimPrefix(s.Context, "ci/prow/")
+				if test == s.Context || test == "" {
+					continue
+				}
+				job := "pull-ci-" + org + "-" + repo + "-" + base + "-" + test
+				sum, _ := health.Collect(ctx, c, g.bucket, job, g.window)
+				cards = append(cards, card{Check: s.Context, Job: job, Health: sum})
+			}
+
+			var buf bytes.Buffer
+			if g.jsonOut {
+				writeJSON(&buf, map[string]any{"pr": args[0], "title": title, "sha": sha, "failing": cards})
+			} else {
+				fmt.Fprintf(&buf, "%s/%s#%s  %s\n\n", org, repo, num, title)
+				if len(cards) == 0 {
+					fmt.Fprintln(&buf, "no failing Prow checks on the head commit")
+				}
+				bad := 0
+				for _, cd := range cards {
+					icon, label := render.VerdictLabel(cd.Health.Verdict)
+					fmt.Fprintf(&buf, "  %-38s %s %-9s %s pass (%d runs)\n", cd.Job, icon, label,
+						health.FormatRate(cd.Health.PassRate), cd.Health.Runs)
+					if cd.Health.Verdict.IsBad() {
+						bad++
+					}
+				}
+				if bad > 0 && bad == len(cards) {
+					fmt.Fprintln(&buf, "\n  all failing jobs have poor history — the PR is probably not the cause")
+				}
+			}
+			g.emit(&buf, stats.Record{Cmd: "pr", Target: org + "/" + repo + "#" + num, Repo: org + "/" + repo}, c, start)
+			return nil
+		},
+	}
+}
+
+func ghGet(endpoint string) ([]byte, error) {
+	out, err := exec.Command("gh", "api", endpoint).Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh api %s: %w", endpoint, err)
+	}
+	return out, nil
+}
+
+func ghJSON(endpoint string) (map[string]any, error) {
+	out, err := ghGet(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func stringField(m map[string]any, obj, field string) string {
+	inner, _ := m[obj].(map[string]any)
+	v, _ := inner[field].(string)
+	return v
+}
+
+// ---------- mcp ----------
+
+func newMCPCmd(g *globals) *cobra.Command {
+	return &cobra.Command{
+		Use:    "mcp",
+		Short:  "Run a minimal MCP stdio server",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return serveMCP(g)
+		},
+	}
+}
+
+type rpcReq struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+func serveMCP(g *globals) error {
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	enc := json.NewEncoder(os.Stdout)
+
+	tools := []map[string]any{
+		{"name": "prow_run", "description": "Digest of a Prow job run", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}}, "required": []string{"url"}}},
+		{"name": "prow_job", "description": "Health of a Prow job over retained history", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"job": map[string]any{"type": "string"}}, "required": []string{"job"}}},
+	}
+
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var req rpcReq
+		if json.Unmarshal(line, &req) != nil {
+			continue
+		}
+		resp := map[string]any{"jsonrpc": "2.0", "id": req.ID}
+		switch req.Method {
+		case "initialize":
+			resp["result"] = map[string]any{
+				"protocolVersion": "2024-11-05",
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "whyfail", "version": version},
+			}
+		case "tools/list":
+			resp["result"] = map[string]any{"tools": tools}
+		case "tools/call":
+			var p struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			text, err := mcpCall(g, p.Name, p.Arguments)
+			if err != nil {
+				resp["error"] = map[string]any{"code": -32000, "message": err.Error()}
+			} else {
+				resp["result"] = map[string]any{
+					"content": []map[string]any{{"type": "text", "text": text}},
+				}
+			}
+		default:
+			if req.ID == nil {
+				continue // notification
+			}
+			resp["error"] = map[string]any{"code": -32601, "message": "method not found"}
+		}
+		if req.ID == nil && req.Method != "initialize" {
+			continue
+		}
+		if err := enc.Encode(resp); err != nil {
+			return err
+		}
+	}
+	return sc.Err()
+}
+
+func mcpCall(g *globals, name string, args map[string]any) (string, error) {
+	ctx := context.Background()
+	c := newClient(g)
+	switch name {
+	case "prow_run":
+		raw, _ := args["url"].(string)
+		ref, err := prow.ParseRef(raw)
+		if err != nil {
+			return "", err
+		}
+		d, err := run.Build(ctx, c, ref, run.Options{History: true})
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(d)
+		return string(b), nil
+	case "prow_job":
+		job, _ := args["job"].(string)
+		sum, err := health.Collect(ctx, c, g.bucket, job, g.window)
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(sum)
+		return string(b), nil
+	}
+	return "", fmt.Errorf("unknown tool %q", name)
+}

@@ -1,0 +1,82 @@
+<testsuites>
+  <testsuite name="step graph" tests="24" skipped="0" failures="2" time="8327.923749024">
+    <properties></properties>
+    <testcase name="" time="0.000165003">
+      <properties></properties>
+    </testcase>
+    <testcase name="Build image cert-manager from the repository" time="507.619546595">
+      <properties></properties>
+    </testcase>
+    <testcase name="Build image cert-manager-istio-csr from the repository" time="357.077267358">
+      <properties></properties>
+    </testcase>
+    <testcase name="Build image cert-manager-operator from the repository" time="708.75357614">
+      <properties></properties>
+    </testcase>
+    <testcase name="Build image cert-manager-operator-bundle from the repository" time="74.353884682">
+      <properties></properties>
+    </testcase>
+    <testcase name="Build image cert-manager-trust-manager from the repository" time="180.576664038">
+      <properties></properties>
+    </testcase>
+    <testcase name="Build image src-bundle from the repository" time="84.015108452">
+      <properties></properties>
+    </testcase>
+    <testcase name="Clone the correct source code into an image and tag it as src" time="282.537030148">
+      <properties></properties>
+    </testcase>
+    <testcase name="Find the input image base-rhel9 and tag it into the pipeline" time="0.146458945">
+      <properties></properties>
+    </testcase>
+    <testcase name="Find the input image ocp-cli-jq-latest and tag it into the pipeline" time="0.899831841">
+      <properties></properties>
+    </testcase>
+    <testcase name="Find the input image operator-sdk and tag it into the pipeline" time="0.89393761">
+      <properties></properties>
+    </testcase>
+    <testcase name="Find the input image root and tag it into the pipeline" time="0.153095303">
+      <properties></properties>
+    </testcase>
+    <testcase name="Import the release payload &#34;latest-e2e-operator&#34; from an external source" time="170.799506938">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step gather-audit-logs" time="26">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step gather-extra" time="254">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step gather-must-gather" time="115">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step install" time="51">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step ipi-install-rbac" time="0">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step merge-stage-registry-credentials" time="74">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step openshift-configure-cincinnati" time="1">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step test" time="6189">
+      <properties></properties>
+      <failure message="">&#34;condition.Status&#34;:&#34;False&#34;,&#34;matcher.shouldMatchAny&#34;:false},{&#34;condition.Type&#34;:&#34;^foo-controller.*Available$&#34;,&#34;condition.Status&#34;:&#34;True&#34;,&#34;matcher.shouldMatchAny&#34;:false}]&#xA;=== RUN   TestVerifyOperatorStatusCondition/A_missing_condition_for_Progressing&#xA;2026/11/13 19:29:46 found status.conditions: [{&#34;type&#34;:&#34;foo-controllerAvailable&#34;,&#34;status&#34;:&#34;True&#34;,&#34;lastTransitionTime&#34;:null},{&#34;type&#34;:&#34;foo-controller-bar-Available&#34;,&#34;status&#34;:&#34;False&#34;,&#34;lastTransitionTime&#34;:null},{&#34;type&#34;:&#34;foo-controllerDegraded&#34;,&#34;status&#34;:&#34;False&#34;,&#34;lastTransitionTime&#34;:null},{&#34;type&#34;:&#34;foo-controller-bar-Degraded&#34;,&#34;status&#34;:&#34;False&#34;,&#34;lastTransitionTime&#34;:null}]&#xA;2026/11/13 19:29:46 expected status.conditions to adhere with [{&#34;condition.Type&#34;:&#34;^foo-controller.*Progressing$&#34;,&#34;condition.Status&#34;:&#34;False&#34;,&#34;matcher.shouldMatchAny&#34;:false},{&#34;condition.Type&#34;:&#34;^foo-controller.*Available$&#34;,&#34;condition.Status&#34;:&#34;True&#34;,&#34;matcher.shouldMatchAny&#34;:false},{&#34;condition.Type&#34;:&#34;^foo-controller.*Degraded$&#34;,&#34;condition.Status&#34;:&#34;False&#34;,&#34;matcher.shouldMatchAny&#34;:false}]&#xA;--- PASS: TestVerifyOperatorStatusCondition (0.20s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/One_degraded_is_true_but_another_is_false_using_Any (0.00s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/Any_matches_later_condition_even_when_an_earlier_same-type_condition_has_the_wrong_status (0.00s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/Both_degraded_is_false (0.00s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/One_available_is_true_but_another_is_false_using_All (0.10s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/A_missing_condition_for_Progressing (0.10s)&#xA;FAIL&#xA;FAIL&#x9;github.com/openshift/cert-manager-operator/test/e2e&#x9;5740.396s&#xA;FAIL&#xA;make: *** [Makefile:290: test-e2e] Error 1&#xA;{&#34;component&#34;:&#34;entrypoint&#34;,&#34;error&#34;:&#34;wrapped process failed: exit status 2&#34;,&#34;file&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint/run.go:90&#34;,&#34;func&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint.Options.internalRun&#34;,&#34;level&#34;:&#34;error&#34;,&#34;msg&#34;:&#34;Error executing test process&#34;,&#34;severity&#34;:&#34;error&#34;,&#34;time&#34;:&#34;2026-11-13T19:29:46Z&#34;}&#xA;error: failed to execute wrapped command: exit status 2&#xA;</failure>
+    </testcase>
+    <testcase name="Run multi-stage test post phase" time="708.954588277">
+      <properties></properties>
+      <system-out>The collected steps of multi-stage phase post.</system-out>
+    </testcase>
+    <testcase name="Run multi-stage test pre phase" time="24.49299859">
+      <properties></properties>
+      <system-out>The collected steps of multi-stage phase pre.</system-out>
+    </testcase>
+    <testcase name="Run multi-stage test test phase" time="6368.58806934">
+      <properties></properties>
+      <failure message="">&#34;e2e-operator&#34; pod &#34;e2e-operator-test&#34; failed: could not watch pod: the pod ci-op-fdjznmdt/e2e-operator-test failed after 1h43m18s (failed containers: test): ContainerFailed one or more containers exited&#xA;&#xA;Container test exited with code 2, reason Error&#xA;---&#xA;&#34;condition.Status&#34;:&#34;False&#34;,&#34;matcher.shouldMatchAny&#34;:false},{&#34;condition.Type&#34;:&#34;^foo-controller.*Available$&#34;,&#34;condition.Status&#34;:&#34;True&#34;,&#34;matcher.shouldMatchAny&#34;:false}]&#xA;=== RUN   TestVerifyOperatorStatusCondition/A_missing_condition_for_Progressing&#xA;2026/11/13 19:29:46 found status.conditions: [{&#34;type&#34;:&#34;foo-controllerAvailable&#34;,&#34;status&#34;:&#34;True&#34;,&#34;lastTransitionTime&#34;:null},{&#34;type&#34;:&#34;foo-controller-bar-Available&#34;,&#34;status&#34;:&#34;False&#34;,&#34;lastTransitionTime&#34;:null},{&#34;type&#34;:&#34;foo-controllerDegraded&#34;,&#34;status&#34;:&#34;False&#34;,&#34;lastTransitionTime&#34;:null},{&#34;type&#34;:&#34;foo-controller-bar-Degraded&#34;,&#34;status&#34;:&#34;False&#34;,&#34;lastTransitionTime&#34;:null}]&#xA;2026/11/13 19:29:46 expected status.conditions to adhere with [{&#34;condition.Type&#34;:&#34;^foo-controller.*Progressing$&#34;,&#34;condition.Status&#34;:&#34;False&#34;,&#34;matcher.shouldMatchAny&#34;:false},{&#34;condition.Type&#34;:&#34;^foo-controller.*Available$&#34;,&#34;condition.Status&#34;:&#34;True&#34;,&#34;matcher.shouldMatchAny&#34;:false},{&#34;condition.Type&#34;:&#34;^foo-controller.*Degraded$&#34;,&#34;condition.Status&#34;:&#34;False&#34;,&#34;matcher.shouldMatchAny&#34;:false}]&#xA;--- PASS: TestVerifyOperatorStatusCondition (0.20s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/One_degraded_is_true_but_another_is_false_using_Any (0.00s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/Any_matches_later_condition_even_when_an_earlier_same-type_condition_has_the_wrong_status (0.00s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/Both_degraded_is_false (0.00s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/One_available_is_true_but_another_is_false_using_All (0.10s)&#xA;    --- PASS: TestVerifyOperatorStatusCondition/A_missing_condition_for_Progressing (0.10s)&#xA;FAIL&#xA;FAIL&#x9;github.com/openshift/cert-manager-operator/test/e2e&#x9;5740.396s&#xA;FAIL&#xA;make: *** [Makefile:290: test-e2e] Error 1&#xA;{&#34;component&#34;:&#34;entrypoint&#34;,&#34;error&#34;:&#34;wrapped process failed: exit status 2&#34;,&#34;file&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint/run.go:90&#34;,&#34;func&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint.Options.internalRun&#34;,&#34;level&#34;:&#34;error&#34;,&#34;msg&#34;:&#34;Error executing test process&#34;,&#34;severity&#34;:&#34;error&#34;,&#34;time&#34;:&#34;2026-11-13T19:29:46Z&#34;}&#xA;error: failed to execute wrapped command: exit status 2&#xA;---&#xA;Link to step on registry info site: https://steps.ci.openshift.org/reference/test&#xA;Link to job on registry info site: https://steps.ci.openshift.org/job?org=openshift&amp;repo=cert-manager-operator&amp;branch=master&amp;test=e2e-operator</failure>
+      <system-out>The collected steps of multi-stage phase test.</system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

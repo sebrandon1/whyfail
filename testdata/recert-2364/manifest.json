@@ -1,0 +1,161 @@
+{
+  "captured": "2026-11-13",
+  "note": "stored == GCS listing size; raw == decompressed/served size",
+  "objects": [
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow/2120987688944275456/prowjob.json",
+      "raw": 12278,
+      "sha256": "9353d09be60c1827f9a8a591a1d3fc4fe772049c7ce88efbdbeee6cb0c63c504",
+      "stored": 12278
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow/2120987688944275456/finished.json",
+      "raw": 452,
+      "sha256": "32c757fcd9cb9c6d5099db3ce492cf4910523058d691774177b436bc9cbddc71",
+      "stored": 452
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow/2120987688944275456/artifacts/ci-operator-step-graph.json",
+      "raw": 2032450,
+      "sha256": "cabab308af96db18fb2df8a6f2b2a91a093be6aff6206c6a05190661206a3805",
+      "stored": 264975
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow/2120987688944275456/artifacts/junit_operator.xml",
+      "raw": 7547,
+      "sha256": "ecffe1fc28be4eba5a675d62e53fb72323a7523cafc8f3da7b8a920551bb0b87",
+      "stored": 7547
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow/2120987688944275456/build-log.txt",
+      "raw": 16029,
+      "sha256": "b7232c5e3c095bf516f5e257f44bfe47208515c02c648470daa4d4e786792551",
+      "stored": 3504
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow/2120987688944275456/artifacts/ci-operator-metrics.json",
+      "raw": 113414,
+      "sha256": "023e8cf866801ae8b264b12c52f163ab14bf9f173e175f9afd697a4690749542",
+      "stored": 10471
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial/2120987680551473152/prowjob.json",
+      "raw": 12491,
+      "sha256": "e8a2a8b4358ff3fa1b12fc7b15c2d9206a1f0ecfe5998ac34c0981d2410acb3e",
+      "stored": 12491
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial/2120987680551473152/finished.json",
+      "raw": 452,
+      "sha256": "fc5ca55b2a8f74563588918b256f4351bdb6e3aa40d3355b85fe5be17751f9db",
+      "stored": 452
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial/2120987680551473152/artifacts/ci-operator-step-graph.json",
+      "raw": 4738621,
+      "sha256": "7640a85dedb31a8fccff5da3321f687edfddd03d1878e5b6fbb0093c2e75fa24",
+      "stored": 703052
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial/2120987680551473152/artifacts/junit_operator.xml",
+      "raw": 12135,
+      "sha256": "51cd6f53de034925dac9453030e4e166643d47ee4477a2ea90169f55e15dd748",
+      "stored": 12135
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial/2120987680551473152/build-log.txt",
+      "raw": 3479571,
+      "sha256": "aac5870c24ea378630d43c1ff670c7870e81b721cd4ad7de84da7cbec92e9bad",
+      "stored": 166879
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial/2120987680551473152/artifacts/ci-operator-metrics.json",
+      "raw": 170664,
+      "sha256": "7473422cfca0494a874b152e1b0d7f78a2950828cc5390b31d2231f536d31efd",
+      "stored": 14680
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial/2120987680551473152/artifacts/e2e-aws-ovn-single-node-recert-serial/single-node-e2e-test/artifacts/junit/extension_test_result_e2e__20261113-004553.json",
+      "raw": 7174788,
+      "sha256": "b469af4d03db9fd062da18d7a8ad6cf28866ffa69161a13466dbb83fb9bf7cb3",
+      "stored": 687662
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial/2120987680551473152/artifacts/e2e-aws-ovn-single-node-recert-serial/single-node-e2e-test/artifacts/junit/extension_test_result_monitors__20261113-004553.json",
+      "raw": 1600788,
+      "sha256": "3f4b5190981979658848cdab211836b6f98be984754b9b2707ce23aa1854ab9e",
+      "stored": 77219
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename/2120987667142283264/prowjob.json",
+      "raw": 12591,
+      "sha256": "5d96f5c468b26d54a0455404cda6ec48d0dd6b20dcf2b5fe907419e167874b11",
+      "stored": 12591
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename/2120987667142283264/finished.json",
+      "raw": 452,
+      "sha256": "ef993cadb1c50e07ae7a3016a891b9928a619b9dfef0bbdffbc2ea01030df205",
+      "stored": 452
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename/2120987667142283264/artifacts/ci-operator-step-graph.json",
+      "raw": 2986488,
+      "sha256": "161b3320135e5df5ebc2d607495b4b4d66daf7c45958d0f2fa8751b493af9d39",
+      "stored": 428065
+    },
+    {
+      "encoding": "identity",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename/2120987667142283264/artifacts/junit_operator.xml",
+      "raw": 12112,
+      "sha256": "df06d3fb92d5a62dcf879618e6787dd7f08157672a5ae8f92371286d513f10a9",
+      "stored": 12112
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename/2120987667142283264/build-log.txt",
+      "raw": 1320815,
+      "sha256": "f3f090d25cf7b7656310d42500bfedcaa02d81cc0e7553d2f9da601c8f09add9",
+      "stored": 64188
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename/2120987667142283264/artifacts/ci-operator-metrics.json",
+      "raw": 116032,
+      "sha256": "f12d1f055fb57c120e82876b55e1989cd84e6cea27294de124f4c5369ff8408e",
+      "stored": 11142
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename/2120987667142283264/artifacts/baremetalds-sno-recert-cluster-rename/baremetalds-sno-test/artifacts/tmp/artifacts/reports/extension_test_result_e2e__20261112-230557.json",
+      "raw": 489296,
+      "sha256": "6218d0c33887b5e5d1f91cc1c32bc9333e34570568d01641afc31cf5f4518a3f",
+      "stored": 36059
+    },
+    {
+      "encoding": "gzip",
+      "object": "pr-logs/pull/rh-ecosystem-edge_recert/2364/pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename/2120987667142283264/artifacts/baremetalds-sno-recert-cluster-rename/baremetalds-sno-test/artifacts/tmp/artifacts/reports/extension_test_result_monitors__20261112-230557.json",
+      "raw": 871648,
+      "sha256": "779e3ec73d3c308dd8b07d032b28e91fab0dcfc8b891357a2c34d3af37e9d661",
+      "stored": 39700
+    }
+  ],
+  "source": "https://github.com/rh-ecosystem-edge/recert/pull/2364"
+}

@@ -1,0 +1,101 @@
+<testsuites>
+  <testsuite name="step graph" tests="30" skipped="0" failures="3" time="8000.443483119">
+    <properties></properties>
+    <testcase name="" time="4.0221e-05">
+      <properties></properties>
+    </testcase>
+    <testcase name="All images are built and tagged into stable" time="2.351e-06">
+      <properties></properties>
+    </testcase>
+    <testcase name="Build image recert from the repository" time="414.367667468">
+      <properties></properties>
+    </testcase>
+    <testcase name="Build image recert-check from the repository" time="646.506036297">
+      <properties></properties>
+    </testcase>
+    <testcase name="Clone the correct source code into an image and tag it as src" time="663.11181155">
+      <properties></properties>
+    </testcase>
+    <testcase name="Create the release image &#34;latest&#34; containing all images built by this job" time="116.19744191">
+      <properties></properties>
+    </testcase>
+    <testcase name="Find all of the input images from ocp/5.0 and tag them into the stable stream" time="205.315683949">
+      <properties></properties>
+    </testcase>
+    <testcase name="Find the input image dev-scripts and tag it into the pipeline" time="1.2906504650000001">
+      <properties></properties>
+    </testcase>
+    <testcase name="Find the input image installer and tag it into the pipeline" time="1.290514602">
+      <properties></properties>
+    </testcase>
+    <testcase name="Find the input image root and tag it into the pipeline" time="1.290672055">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step baremetalds-devscripts-gather" time="39">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step baremetalds-devscripts-ibm" time="2">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step baremetalds-devscripts-proxy" time="14">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step baremetalds-devscripts-setup" time="2635">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step baremetalds-sno-conf" time="1">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step baremetalds-sno-rename" time="2205">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step baremetalds-sno-test" time="731">
+      <properties></properties>
+      <failure message="">ng JUnit report to /tmp/artifacts/reports/e2e-monitor-tests__20261112-230557.xml&#xA;Writing extension test results.&#xA;Writing extension test results JSON to /tmp/artifacts/reports/extension_test_result_monitors__20261112-230557.json&#xA;Writing extension test results HTML to /tmp/artifacts/reports/extension_test_result_monitors__20261112-230557-summary.html&#xA;time=&#34;2026-11-12T23:12:54Z&#34; level=info msg=&#34;Mass failure check passed: 4 failures (threshold: 10 failures)&#34;&#xA;Writing JUnit report to /tmp/artifacts/reports/junit_e2e__20261112-230557.xml&#xA;&#xA;Writing extension test results JSON to /tmp/artifacts/reports/extension_test_result_e2e__20261112-230557.json&#xA;Writing extension test results HTML to /tmp/artifacts/reports/extension_test_result_e2e__20261112-230557-summary.html&#xA;Writing extension test results HTML to /tmp/artifacts/reports/extension_test_result_e2e__20261112-230557-everything.html&#xA;time=&#34;2026-11-12T23:12:54Z&#34; level=info msg=&#34;Writing duration metrics to /tmp/artifacts/reports/duration-metrics-e2e_20261112-230557-autodl.json&#34;&#xA;Suite run returned error: failed due to a MonitorTest failure&#xA;error: error running a test suite: failed due to a MonitorTest failure&#xA;+ exit_code=1&#xA;+ [[ 1 -ne 0 ]]&#xA;+ exit 1&#xA;+ rm -f /tmp/tmp.VQmHVMzpYb&#xA;+ exit_code=1&#xA;+ set -e&#xA;+ echo &#39;### Done! (1)&#39;&#xA;### Done! (1)&#xA;+ exit 1&#xA;+ collect_artifacts&#xA;+ echo &#39;### Fetching results&#39;&#xA;### Fetching results&#xA;+ ssh -o Port=22 -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=90 -o LogLevel=ERROR -i /var/run/secrets/ci.openshift.io/cluster-profile/packet-ssh-key root@150.239.182.156 tar -czf - /tmp/artifacts&#xA;+ tar -C /logs/artifacts -xzf -&#xA;tar: Removing leading `/&#39; from member names&#xA;{&#34;component&#34;:&#34;entrypoint&#34;,&#34;error&#34;:&#34;wrapped process failed: exit status 1&#34;,&#34;file&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint/run.go:90&#34;,&#34;func&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint.Options.internalRun&#34;,&#34;level&#34;:&#34;error&#34;,&#34;msg&#34;:&#34;Error executing test process&#34;,&#34;severity&#34;:&#34;error&#34;,&#34;time&#34;:&#34;2026-11-12T23:12:55Z&#34;}&#xA;error: failed to execute wrapped command: exit status 1&#xA;</failure>
+    </testcase>
+    <testcase name="Run multi-stage step gather-audit-logs" time="2">
+      <properties></properties>
+      <failure message="">ift, openshift.default, openshift.default.svc, openshift.default.svc.cluster.local, 172.30.0.1, not api.ostest.test.metalkube.org&#xA;&#xA;&#xA;Reprinting Cluster State:&#xA;When opening a support case, bugzilla, or issue please include the following summary data along with any other requested information:&#xA;error getting cluster version: Get &#34;https://api.ostest.test.metalkube.org:6443/apis/config.openshift.io/v1/clusterversions/version&#34;: tls: failed to verify certificate: x509: certificate is valid for kubernetes, kubernetes.default, kubernetes.default.svc, kubernetes.default.svc.cluster.local, openshift, openshift.default, openshift.default.svc, openshift.default.svc.cluster.local, 172.30.0.1, not api.ostest.test.metalkube.org&#xA;ClusterID: &#xA;ClientVersion: v4.2.0-alpha.0-3040-g6b40d97&#xA;ClusterVersion: Installing &#34;&#34; for &lt;unknown&gt;: &lt;unknown&gt;&#xA;error getting cluster operators: Get &#34;https://api.ostest.test.metalkube.org:6443/apis/config.openshift.io/v1/clusteroperators&#34;: tls: failed to verify certificate: x509: certificate is valid for kubernetes, kubernetes.default, kubernetes.default.svc, kubernetes.default.svc.cluster.local, openshift, openshift.default, openshift.default.svc, openshift.default.svc.cluster.local, 172.30.0.1, not api.ostest.test.metalkube.org&#xA;ClusterOperators:&#xA;&#x9;clusteroperators are missing&#xA;&#xA;&#xA;error: creating temp namespace: Post &#34;https://api.ostest.test.metalkube.org:6443/api/v1/namespaces&#34;: tls: failed to verify certificate: x509: certificate is valid for kubernetes, kubernetes.default, kubernetes.default.svc, kubernetes.default.svc.cluster.local, openshift, openshift.default, openshift.default.svc, openshift.default.svc.cluster.local, 172.30.0.1, not api.ostest.test.metalkube.org&#xA;{&#34;component&#34;:&#34;entrypoint&#34;,&#34;error&#34;:&#34;wrapped process failed: exit status 1&#34;,&#34;file&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint/run.go:90&#34;,&#34;func&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint.Options.internalRun&#34;,&#34;level&#34;:&#34;error&#34;,&#34;msg&#34;:&#34;Error executing test process&#34;,&#34;severity&#34;:&#34;error&#34;,&#34;time&#34;:&#34;2026-11-12T23:24:01Z&#34;}&#xA;error: failed to execute wrapped command: exit status 1&#xA;</failure>
+    </testcase>
+    <testcase name="Run multi-stage step gather-extra" time="427">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step gather-must-gather" time="50">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step ipi-install-hosted-loki" time="0">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step ipi-install-rbac" time="1">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step ofcir-acquire" time="34">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step ofcir-release" time="0">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage step rhcos-conf-osstream" time="0">
+      <properties></properties>
+    </testcase>
+    <testcase name="Run multi-stage test post phase" time="676.578005508">
+      <properties></properties>
+      <system-out>The collected steps of multi-stage phase post.</system-out>
+    </testcase>
+    <testcase name="Run multi-stage test pre phase" time="2755.716727952">
+      <properties></properties>
+      <system-out>The collected steps of multi-stage phase pre.</system-out>
+    </testcase>
+    <testcase name="Run multi-stage test test phase" time="3255.827377912">
+      <properties></properties>
+      <failure message="">&#34;baremetalds-sno-recert-cluster-rename&#34; pod &#34;baremetalds-sno-recert-cluster-rename-baremetalds-sno-test&#34; failed: could not watch pod: the pod ci-op-n31bt3yf/baremetalds-sno-recert-cluster-rename-baremetalds-sno-test failed after 12m30s (failed containers: test): ContainerFailed one or more containers exited&#xA;&#xA;Container test exited with code 1, reason Error&#xA;---&#xA;ng JUnit report to /tmp/artifacts/reports/e2e-monitor-tests__20261112-230557.xml&#xA;Writing extension test results.&#xA;Writing extension test results JSON to /tmp/artifacts/reports/extension_test_result_monitors__20261112-230557.json&#xA;Writing extension test results HTML to /tmp/artifacts/reports/extension_test_result_monitors__20261112-230557-summary.html&#xA;time=&#34;2026-11-12T23:12:54Z&#34; level=info msg=&#34;Mass failure check passed: 4 failures (threshold: 10 failures)&#34;&#xA;Writing JUnit report to /tmp/artifacts/reports/junit_e2e__20261112-230557.xml&#xA;&#xA;Writing extension test results JSON to /tmp/artifacts/reports/extension_test_result_e2e__20261112-230557.json&#xA;Writing extension test results HTML to /tmp/artifacts/reports/extension_test_result_e2e__20261112-230557-summary.html&#xA;Writing extension test results HTML to /tmp/artifacts/reports/extension_test_result_e2e__20261112-230557-everything.html&#xA;time=&#34;2026-11-12T23:12:54Z&#34; level=info msg=&#34;Writing duration metrics to /tmp/artifacts/reports/duration-metrics-e2e_20261112-230557-autodl.json&#34;&#xA;Suite run returned error: failed due to a MonitorTest failure&#xA;error: error running a test suite: failed due to a MonitorTest failure&#xA;+ exit_code=1&#xA;+ [[ 1 -ne 0 ]]&#xA;+ exit 1&#xA;+ rm -f /tmp/tmp.VQmHVMzpYb&#xA;+ exit_code=1&#xA;+ set -e&#xA;+ echo &#39;### Done! (1)&#39;&#xA;### Done! (1)&#xA;+ exit 1&#xA;+ collect_artifacts&#xA;+ echo &#39;### Fetching results&#39;&#xA;### Fetching results&#xA;+ ssh -o Port=22 -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=90 -o LogLevel=ERROR -i /var/run/secrets/ci.openshift.io/cluster-profile/packet-ssh-key root@150.239.182.156 tar -czf - /tmp/artifacts&#xA;+ tar -C /logs/artifacts -xzf -&#xA;tar: Removing leading `/&#39; from member names&#xA;{&#34;component&#34;:&#34;entrypoint&#34;,&#34;error&#34;:&#34;wrapped process failed: exit status 1&#34;,&#34;file&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint/run.go:90&#34;,&#34;func&#34;:&#34;sigs.k8s.io/prow/pkg/entrypoint.Options.internalRun&#34;,&#34;level&#34;:&#34;error&#34;,&#34;msg&#34;:&#34;Error executing test process&#34;,&#34;severity&#34;:&#34;error&#34;,&#34;time&#34;:&#34;2026-11-12T23:12:55Z&#34;}&#xA;error: failed to execute wrapped command: exit status 1&#xA;---&#xA;Link to step on registry info site: https://steps.ci.openshift.org/reference/baremetalds-sno-test&#xA;Link to job on registry info site: https://steps.ci.openshift.org/job?org=rh-ecosystem-edge&amp;repo=recert&amp;branch=main&amp;test=baremetalds-sno-recert-cluster-rename</failure>
+      <system-out>The collected steps of multi-stage phase test.</system-out>
+    </testcase>
+    <testcase name="Tag the image recert into the image stream tag stable:recert" time="0.062665903">
+      <properties></properties>
+    </testcase>
+    <testcase name="Tag the image recert-check into the image stream tag stable:recert-check" time="0.069546499">
+      <properties></properties>
+    </testcase>
+  </testsuite>
+</testsuites>
