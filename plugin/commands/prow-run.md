@@ -9,7 +9,7 @@ Run `whyfail run $ARGUMENTS` and summarize:
 - the run result and duration versus its timeout,
 - any failing step or blocking test, with the one-line error,
 - the infrastructure signals (lease region/slice, install failure),
-- the `next:` recommendation.
+- the `NEXT` recommendation.
 
 If a job-health verdict is present, lead with it. Do not fetch the Prow page or
 GCS artifacts separately.

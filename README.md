@@ -62,6 +62,8 @@ Global flags apply to every command:
 | `--bucket <name>` | GCS bucket used for job history |
 | `--bytes-per-token <n>` | bytes-per-token estimate used by `gain` |
 | `--baseline <dur>` | modelled manual time per call used by `gain` |
+| `--color auto\|always\|never` | colourise human output (default `auto`: only on a TTY) |
+| `--width <n>` | output width in columns (default `$COLUMNS`, else 100) |
 
 Command-specific flags:
 
@@ -77,6 +79,42 @@ Command-specific flags:
 
 - `WHYFAIL_CACHE_DIR` — relocates both the object cache and `stats.jsonl`
 - `WHYFAIL_NO_STATS` — set to anything to disable statistics recording
+- `NO_COLOR` / `CLICOLOR=0` / `TERM=dumb` — disable colour, as `--color never` does
+
+### Output
+
+Human output is one card with a fixed 9-character label gutter, colour-coded
+verdicts, and everything folded to the terminal width; `--json` stays structured:
+
+```
+pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename
+⚠ FLAKY     63.8% pass · 154 runs since 2026-09-17 · last pass 2026-11-12
+
+  RUN       2120987667142283264   FAILURE   2h13m   28% of 8h00m timeout
+  PR        rh-ecosystem-edge/recert#2364   sebrandon1
+            "CNF-30065: add integration scenarios for cluster customizations…"
+  CLUSTER   build10 · ci · /test baremetalds-sno-recert-cluster-rename
+  REASON    executing_graph:step_failed:utilizing_lease:executing_test:executing_…
+
+  ────────────────────────────────────────────────────────────────────────
+  STEPS     13 total · 3 failed
+  ✗  baremetalds-sno-recert-cluster-rename    1h51m
+  ✗  baremetalds-sno-test                    12m11s
+       no JUnit report to /tmp/artifacts/reports/e2e-monitor-tests__…xml
+  ✗  gather-audit-logs                           2s
+       error getting cluster version: tls: failed to verify certificate…
+       … (2 more lines in --json)
+
+  TESTS     50 pass · 0 fail · 0 skip   [extension]
+  MONITORS  76 failures · 8 causes
+   51×  monitor: kubelet-container-restarts
+   13×  monitor: required-scc-annotation-checker
+
+  NEXT      a retest is reasonable
+```
+
+Paths are shortened from the middle so the filename survives, and long errors are
+cut to two lines — `--json` and `whyfail log` carry the rest.
 
 ## How the health numbers are computed
 

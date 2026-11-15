@@ -18,7 +18,7 @@ Never curl Prow, GCS, Sippy, or search.ci directly.
 2. **Then digest the run** if the user wants the failure itself:
    `whyfail run <prow-url>`
    This prints the failing step or test, a short error excerpt, infra signals
-   (lease/quota/region), and a `next:` suggestion.
+   (lease/quota/region), and a `NEXT` suggestion.
 
 3. **Drill down only as needed**, and cite what you looked at:
    - `whyfail log <prow-url> <step> --tail 80`

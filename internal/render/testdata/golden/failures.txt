@@ -1,0 +1,11 @@
+pull-ci-org-repo-main-e2e FAILURE
+
+  STEPS     1 failed
+  ✗  e2e-flow        1m00s
+
+  BLOCK  [sig-x] thing
+         boom
+         second line
+  inform informant
+  MONITORS  1 failed
+  monitor  monitor-a
