@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"sort"
@@ -247,5 +248,38 @@ func TestFormatRateAndBaseName(t *testing.T) {
 	}
 	if got := baseName("single"); got != "single" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestCollectUnknownJob(t *testing.T) {
+	c := fakeClient(t, map[string]string{}, nil)
+	_, err := Collect(context.Background(), c, "bkt", "pull-ci-org-repo-main-nope", 0)
+	if !errors.Is(err, ErrJobNotFound) {
+		t.Fatalf("err = %v, want ErrJobNotFound", err)
+	}
+}
+
+func TestCollectUnusableIndexIsNotAnError(t *testing.T) {
+	// The job exists but every index entry is unusable, which is a real job with
+	// an odd index rather than a name that never existed.
+	objects := map[string]string{
+		"pr-logs/directory/job/latest-build.txt": "102",
+		"pr-logs/directory/job/notes.txt":        "gs://bkt/pr-logs/pull/o_r/1/job/102",
+	}
+	c := fakeClient(t, objects, nil)
+
+	s, err := Collect(context.Background(), c, "bkt", "job", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Runs != 0 || s.Verdict != VerdictUnknown {
+		t.Fatalf("got runs=%d verdict=%s", s.Runs, s.Verdict)
+	}
+}
+
+func TestCollectPeriodicUnknownJob(t *testing.T) {
+	c := fakeClient(t, map[string]string{}, map[string][]string{})
+	if _, err := Collect(context.Background(), c, "bkt", "periodic-nope", 0); !errors.Is(err, ErrJobNotFound) {
+		t.Fatalf("err = %v, want ErrJobNotFound", err)
 	}
 }

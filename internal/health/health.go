@@ -4,6 +4,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,6 +13,11 @@ import (
 
 	"github.com/sebrandon1/whyfail/internal/gcs"
 )
+
+// ErrJobNotFound is returned when a job name matches neither the presubmit
+// index nor the periodic log layout. That is almost always a typo or a
+// renamed job, and it is worth saying so rather than printing an empty card.
+var ErrJobNotFound = errors.New("job not found")
 
 // RunResult is one historical run of a job.
 type RunResult struct {
@@ -155,6 +161,12 @@ func enumerate(ctx context.Context, c *gcs.Client, bucket, job string) ([]runPat
 			continue
 		}
 		out = append(out, runPath{ID: id, Path: d})
+	}
+	// A job that never existed leaves both layouts empty. A job that does exist
+	// but whose index entries are unusable still has objects, so it stays an
+	// empty summary rather than becoming an error.
+	if len(objs) == 0 && len(dirs) == 0 {
+		return nil, ErrJobNotFound
 	}
 	return out, nil
 }
