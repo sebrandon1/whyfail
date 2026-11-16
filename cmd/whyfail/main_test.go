@@ -111,12 +111,18 @@ func TestPRCardLine(t *testing.T) {
 	const job = "pull-ci-org-repo-main-e2e-aws"
 
 	// A job that is not in the bucket must not panic or read as healthy.
-	unknown := prCardLine(st, prCard{Job: job}, 40)
+	unknown := prCardLine(st, prCard{Job: job, Prow: true}, 40)
 	if !strings.Contains(unknown, "UNKNOWN") || !strings.Contains(unknown, "no history in this bucket") {
 		t.Errorf("nil health: %q", unknown)
 	}
 
-	flaky := prCardLine(st, prCard{Job: job, Health: &health.Summary{
+	// A check with no Prow job behind it is a failure, not an unknown job.
+	nonProw := prCardLine(st, prCard{Check: "build-and-test"}, 40)
+	if !strings.Contains(nonProw, "FAILED") || !strings.Contains(nonProw, "no Prow job") {
+		t.Errorf("non-Prow check: %q", nonProw)
+	}
+
+	flaky := prCardLine(st, prCard{Job: job, Prow: true, Health: &health.Summary{
 		Verdict: health.VerdictFlaky, PassRate: 0.5, Runs: 10,
 	}}, 40)
 	for _, want := range []string{"FLAKY", "50.0%", "10 runs"} {
@@ -126,9 +132,72 @@ func TestPRCardLine(t *testing.T) {
 	}
 
 	// The job column is 40; the suffix must still fit the 100-column style.
-	long := prCardLine(st, prCard{Job: strings.Repeat("x", 200)}, 40)
+	long := prCardLine(st, prCard{Job: strings.Repeat("x", 200), Prow: true}, 40)
 	if n := term.Visible(strings.SplitN(long, "\n", 2)[0]); n > st.Width() {
 		t.Errorf("line is %d columns wide: %q", n, long)
+	}
+}
+
+// fakeGH answers gh api requests from a fixed endpoint map.
+func fakeGH(t *testing.T, pages map[string]string) ghAPI {
+	t.Helper()
+	return func(endpoint string, paginate bool) ([]byte, error) {
+		if !paginate {
+			t.Errorf("%s: want a paginated request", endpoint)
+		}
+		body, ok := pages[endpoint]
+		if !ok {
+			t.Fatalf("unexpected endpoint %q", endpoint)
+		}
+		return []byte(body), nil
+	}
+}
+
+func TestCollectPRChecks(t *testing.T) {
+	const (
+		sha      = "abc123"
+		base     = "repos/org/repo/commits/" + sha
+		statuses = base + "/statuses?per_page=100"
+		runs     = base + "/check-runs?per_page=100&filter=latest"
+	)
+	// Two pages of statuses, as `gh api --paginate` emits them: concatenated
+	// arrays with no separator.
+	statusPages := `[{"context":"ci/prow/e2e-aws","state":"failure"}]` +
+		`[{"context":"ci/prow/unit","state":"success"},{"context":"ci/prow/e2e-aws","state":"success"}]`
+	runPages := `{"total_count":3,"check_runs":[{"name":"build","status":"completed","conclusion":"failure"},` +
+		`{"name":"lint","status":"completed","conclusion":"success"},` +
+		`{"name":"e2e","status":"in_progress","conclusion":null}]}`
+
+	cards, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
+		statuses: statusPages,
+		runs:     runPages,
+	}), gcstest.Client(t, &gcstest.Dataset{Objects: map[string][]byte{}, Listing: []gcstest.Item{
+		{Name: "pr-logs/directory/pull-ci-org-repo-main-e2e-aws/latest-build.txt"},
+	}}), gcstest.Bucket, "org", "repo", "main", sha, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// e2e-aws failed on the first page and passed on the second; the first
+	// failing entry wins. build is a failing check run, lint passed, and e2e is
+	// still running so it is not reported.
+	want := []struct {
+		check string
+		prow  bool
+	}{{"ci/prow/e2e-aws", true}, {"build", false}}
+	if len(cards) != len(want) {
+		t.Fatalf("cards = %+v, want %d", cards, len(want))
+	}
+	for i, w := range want {
+		if cards[i].Check != w.check || cards[i].Prow != w.prow {
+			t.Errorf("card %d = %+v, want check %q prow %v", i, cards[i], w.check, w.prow)
+		}
+	}
+	if got := cards[0].Job; got != "pull-ci-org-repo-main-e2e-aws" {
+		t.Errorf("synthesised job = %q", got)
+	}
+	if cards[1].Job != "" {
+		t.Errorf("non-Prow check got a job name: %q", cards[1].Job)
 	}
 }
 
