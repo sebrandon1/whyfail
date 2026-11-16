@@ -21,6 +21,7 @@ import (
 	"github.com/sebrandon1/whyfail/internal/gcs"
 	"github.com/sebrandon1/whyfail/internal/health"
 	"github.com/sebrandon1/whyfail/internal/hook"
+	"github.com/sebrandon1/whyfail/internal/parallel"
 	"github.com/sebrandon1/whyfail/internal/prow"
 	"github.com/sebrandon1/whyfail/internal/render"
 	"github.com/sebrandon1/whyfail/internal/run"
@@ -603,6 +604,10 @@ func newDoctorCmd(g *globals) *cobra.Command {
 
 var prURLRe = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$`)
 
+// prFanOut is how many failing checks are looked up at once. Each health.Collect
+// fans out internally, so the outer width stays small.
+const prFanOut = 4
+
 func newPRCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pr <github-pr-url>",
@@ -660,11 +665,14 @@ func newPRCmd(g *globals) *cobra.Command {
 					continue
 				}
 				job := "pull-ci-" + org + "-" + repo + "-" + base + "-" + test
-				// A missing job history must not hide the failing check; the
-				// renderer says the lookup found nothing.
-				sum, _ := health.Collect(ctx, c, g.bucket, job, g.window)
-				cards = append(cards, prCard{Check: s.Context, Job: job, Health: sum})
+				cards = append(cards, prCard{Check: s.Context, Job: job})
 			}
+			// Each Collect already fans out internally, so keep the outer width
+			// small. A failed lookup leaves a nil summary, which the renderer
+			// reports as an unknown job rather than a healthy one.
+			parallel.Do(len(cards), prFanOut, func(i int) {
+				cards[i].Health, _ = health.Collect(ctx, c, g.bucket, cards[i].Job, g.window)
+			})
 
 			var buf bytes.Buffer
 			if g.jsonOut {

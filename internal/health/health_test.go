@@ -259,6 +259,13 @@ func TestCollectUnknownJob(t *testing.T) {
 	}
 }
 
+func TestCollectPeriodicUnknownJob(t *testing.T) {
+	c := fakeClient(t, map[string]string{}, map[string][]string{})
+	if _, err := Collect(context.Background(), c, "bkt", "periodic-nope", 0); !errors.Is(err, ErrJobNotFound) {
+		t.Fatalf("err = %v, want ErrJobNotFound", err)
+	}
+}
+
 func TestCollectUnusableIndexIsNotAnError(t *testing.T) {
 	// The job exists but every index entry is unusable, which is a real job with
 	// an odd index rather than a name that never existed.
@@ -277,9 +284,28 @@ func TestCollectUnusableIndexIsNotAnError(t *testing.T) {
 	}
 }
 
-func TestCollectPeriodicUnknownJob(t *testing.T) {
-	c := fakeClient(t, map[string]string{}, map[string][]string{})
-	if _, err := Collect(context.Background(), c, "bkt", "periodic-nope", 0); !errors.Is(err, ErrJobNotFound) {
-		t.Fatalf("err = %v, want ErrJobNotFound", err)
+func TestCollectKeepsRunsOrderedByTime(t *testing.T) {
+	// Listing order (by object name) is the reverse of timestamp order; the
+	// summary must still come back sorted after the parallel fetch.
+	objects := map[string]string{
+		"pr-logs/directory/job/500.txt":            "gs://bkt/pr-logs/pull/o_r/1/job/500",
+		"pr-logs/directory/job/501.txt":            "gs://bkt/pr-logs/pull/o_r/1/job/501",
+		"pr-logs/pull/o_r/1/job/500/finished.json": `{"result":"SUCCESS","timestamp":3000}`,
+		"pr-logs/pull/o_r/1/job/501/finished.json": `{"result":"FAILURE","timestamp":1000}`,
+	}
+	c := fakeClient(t, objects, nil)
+
+	s, err := Collect(context.Background(), c, "bkt", "job", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Runs != 2 || s.Pass != 1 || s.Fail != 1 {
+		t.Fatalf("runs=%d pass=%d fail=%d", s.Runs, s.Pass, s.Fail)
+	}
+	if len(s.Samples) != 2 {
+		t.Fatalf("samples: %d", len(s.Samples))
+	}
+	if !s.Samples[0].Time.Before(s.Samples[1].Time) {
+		t.Fatalf("samples not sorted: %v then %v", s.Samples[0].Time, s.Samples[1].Time)
 	}
 }
