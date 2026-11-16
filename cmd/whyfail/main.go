@@ -24,6 +24,7 @@ import (
 	"github.com/sebrandon1/whyfail/internal/render"
 	"github.com/sebrandon1/whyfail/internal/run"
 	"github.com/sebrandon1/whyfail/internal/stats"
+	"github.com/sebrandon1/whyfail/internal/term"
 )
 
 var version = "dev"
@@ -37,10 +38,12 @@ type globals struct {
 	bytesPerToken int
 	baseline      time.Duration
 	bucket        string
+	colorMode     string
+	width         int
 }
 
 func main() {
-	g := &globals{bytesPerToken: 4, baseline: 10 * time.Minute}
+	g := &globals{bytesPerToken: 4, baseline: 10 * time.Minute, colorMode: "auto"}
 	root := &cobra.Command{
 		Use:           "whyfail",
 		Short:         "Prow CI context for humans and Claude Code",
@@ -56,6 +59,8 @@ func main() {
 	root.PersistentFlags().StringVar(&g.bucket, "bucket", prow.PublicBucket, "GCS bucket for job history")
 	root.PersistentFlags().IntVar(&g.bytesPerToken, "bytes-per-token", 4, "bytes per token estimate for gain")
 	root.PersistentFlags().DurationVar(&g.baseline, "baseline", 10*time.Minute, "modelled manual time per call for gain")
+	root.PersistentFlags().StringVar(&g.colorMode, "color", "auto", "colourise human output: auto, always or never")
+	root.PersistentFlags().IntVar(&g.width, "width", 0, "output width in columns (default: $COLUMNS or 100)")
 
 	root.AddCommand(
 		newRunCmd(g), newJobCmd(g), newFailuresCmd(g), newLogCmd(g), newArtifactCmd(g),
@@ -65,6 +70,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "whyfail:", err)
 		os.Exit(1)
 	}
+}
+
+// style resolves how human output should be painted. It inspects stdout rather
+// than the render buffer, because rendering happens into memory.
+func (g *globals) style() term.Style {
+	return term.Config(os.Stdout, g.colorMode, g.width)
 }
 
 func newClient(g *globals) *gcs.Client {
@@ -84,7 +95,8 @@ func (g *globals) emit(buf *bytes.Buffer, rec stats.Record, c *gcs.Client, start
 		return
 	}
 	rec.TS = time.Now().UTC()
-	rec.EmittedBytes = int64(buf.Len())
+	// Count visible bytes only, so escape sequences never inflate the savings.
+	rec.EmittedBytes = int64(term.PlainBytes(buf.String()))
 	if c != nil {
 		rec.ReadBytes = c.ServedBytes
 		rec.NetworkBytes = c.NetworkBytes
@@ -143,7 +155,7 @@ func newRunCmd(g *globals) *cobra.Command {
 			if g.jsonOut {
 				writeJSON(&buf, d)
 			} else {
-				render.Digest(&buf, d)
+				render.Digest(&buf, d, g.style())
 			}
 			rec := stats.Record{Cmd: "run", Target: ref.Job + "/" + ref.RunID}
 			if d.Artifacts != nil {
@@ -207,7 +219,7 @@ func newJobCmd(g *globals) *cobra.Command {
 			if g.jsonOut {
 				writeJSON(&buf, sum)
 			} else {
-				render.Job(&buf, sum)
+				render.Job(&buf, sum, g.style())
 			}
 			g.emit(&buf, stats.Record{Cmd: "job", Target: args[0], Verdict: string(sum.Verdict)}, c, start)
 			return nil
@@ -244,25 +256,7 @@ func newFailuresCmd(g *globals) *cobra.Command {
 			if g.jsonOut {
 				writeJSON(&buf, out)
 			} else {
-				fmt.Fprintf(&buf, "%s %s\n", d.Run.JobName, strings.ToUpper(d.Run.Result))
-				for _, s := range out.Failed {
-					fmt.Fprintf(&buf, "  step FAILED  %s (%s)\n", s.Name, render.FormatDuration(s.DurationS))
-				}
-				if d.Tests != nil {
-					for _, f := range d.Tests.Failed {
-						label := "inform"
-						if f.Blocking {
-							label = "BLOCK"
-						}
-						fmt.Fprintf(&buf, "  %s  %s\n", label, f.Name)
-						if f.Error != "" {
-							fmt.Fprintf(&buf, "         %s\n", strings.SplitN(f.Error, "\n", 2)[0])
-						}
-					}
-					for _, f := range d.Tests.Monitors {
-						fmt.Fprintf(&buf, "  monitor  %s\n", f.Name)
-					}
-				}
+				render.Failures(&buf, g.style(), d.Run.JobName, d.Run.Result, out.Failed, d.Tests)
 			}
 			g.emit(&buf, stats.Record{Cmd: "failures", Target: ref.Job + "/" + ref.RunID}, c, start)
 			return nil
@@ -354,12 +348,16 @@ func newArtifactCmd(g *globals) *cobra.Command {
 					return err
 				}
 				var buf bytes.Buffer
+				st := g.style()
 				var total int64
 				for _, o := range objs {
 					total += o.Size
-					fmt.Fprintf(&buf, "%10s  %s\n", render.FormatBytes(o.Size), o.Name)
+					fmt.Fprintf(&buf, "  %s  %s\n",
+						st.Dim(term.PadLeft(render.FormatBytes(o.Size), 9)),
+						term.TruncMiddle(o.Name, st.Width()-14))
 				}
-				fmt.Fprintf(&buf, "%d objects, %s total\n", len(objs), render.FormatBytes(total))
+				fmt.Fprintf(&buf, "  %s\n", st.Dim(fmt.Sprintf("%d objects, %s total",
+					len(objs), render.FormatBytes(total))))
 				g.emit(&buf, stats.Record{Cmd: "artifact-list", Target: object, InventoryBytes: total}, c, start)
 				return nil
 			}
@@ -512,7 +510,7 @@ func newGainCmd(g *globals) *cobra.Command {
 			if g.jsonOut {
 				writeJSON(&buf, agg)
 			} else {
-				render.Gain(&buf, agg, g.bytesPerToken, g.baseline)
+				render.Gain(&buf, agg, g.bytesPerToken, g.baseline, g.style())
 			}
 			_, _ = os.Stdout.Write(buf.Bytes())
 			return nil
@@ -671,21 +669,32 @@ func newPRCmd(g *globals) *cobra.Command {
 			if g.jsonOut {
 				writeJSON(&buf, map[string]any{"pr": args[0], "title": title, "sha": sha, "failing": cards})
 			} else {
-				fmt.Fprintf(&buf, "%s/%s#%s  %s\n\n", org, repo, num, title)
+				st := g.style()
+				fmt.Fprintf(&buf, "%s/%s%s  %s\n\n", org, repo, st.Cyan("#"+num), title)
 				if len(cards) == 0 {
 					fmt.Fprintln(&buf, "no failing Prow checks on the head commit")
+				}
+				jobW := st.Width() - 44
+				if jobW < 24 {
+					jobW = 24
+				}
+				if jobW > 60 {
+					jobW = 60
 				}
 				bad := 0
 				for _, cd := range cards {
 					icon, label := render.VerdictLabel(cd.Health.Verdict)
-					fmt.Fprintf(&buf, "  %-38s %s %-9s %s pass (%d runs)\n", cd.Job, icon, label,
-						health.FormatRate(cd.Health.PassRate), cd.Health.Runs)
+					fmt.Fprintf(&buf, "  %s %s %s %s pass (%d runs)\n",
+						term.PadRight(term.TruncMiddle(cd.Job, jobW), jobW),
+						render.VerdictText(st, cd.Health.Verdict, icon),
+						render.VerdictText(st, cd.Health.Verdict, term.PadRight(label, 9)),
+						st.Dim(health.FormatRate(cd.Health.PassRate)), cd.Health.Runs)
 					if cd.Health.Verdict.IsBad() {
 						bad++
 					}
 				}
 				if bad > 0 && bad == len(cards) {
-					fmt.Fprintln(&buf, "\n  all failing jobs have poor history — the PR is probably not the cause")
+					fmt.Fprintf(&buf, "\n  %s\n", st.Yellow("all failing jobs have poor history — the PR is probably not the cause"))
 				}
 			}
 			g.emit(&buf, stats.Record{Cmd: "pr", Target: org + "/" + repo + "#" + num, Repo: org + "/" + repo}, c, start)

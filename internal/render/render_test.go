@@ -2,6 +2,9 @@ package render
 
 import (
 	"bytes"
+	"flag"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,7 +12,39 @@ import (
 	"github.com/sebrandon1/whyfail/internal/health"
 	"github.com/sebrandon1/whyfail/internal/run"
 	"github.com/sebrandon1/whyfail/internal/stats"
+	"github.com/sebrandon1/whyfail/internal/term"
 )
+
+// update rewrites the golden files instead of comparing against them:
+//
+//	go test ./internal/render -update
+var update = flag.Bool("update", false, "rewrite golden files")
+
+// testStyle is plain text at a fixed width, so goldens are stable everywhere.
+func testStyle() term.Style {
+	return term.Config(new(bytes.Buffer), "never", 100)
+}
+
+func golden(t *testing.T, name, got string) {
+	t.Helper()
+	path := filepath.Join("testdata", "golden", name)
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read golden %s: %v (run: go test ./internal/render -update)", name, err)
+	}
+	if got != string(want) {
+		t.Errorf("%s mismatch\n--- want ---\n%s\n--- got ---\n%s", name, want, got)
+	}
+}
 
 func TestFormatDuration(t *testing.T) {
 	cases := []struct {
@@ -65,11 +100,21 @@ func TestFormatCount(t *testing.T) {
 }
 
 func TestTruncate(t *testing.T) {
-	if got := truncate("short", 10); got != "short" {
-		t.Errorf("under limit: %q", got)
+	cases := []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"short", 10, "short"},
+		{"hello world", 5, "hell…"},
+		{"héllo wörld", 6, "héllo…"},
+		{"anything", 0, ""},
+		{"abc", 1, "…"},
 	}
-	if got := truncate("hello world", 5); got != "hello…" {
-		t.Errorf("over limit: %q", got)
+	for _, c := range cases {
+		if got := term.Trunc(c.in, c.n); got != c.want {
+			t.Errorf("truncate(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+		}
 	}
 }
 
@@ -111,13 +156,14 @@ func TestDownloadSeconds(t *testing.T) {
 	}
 }
 
-func TestDigestRendersFullRun(t *testing.T) {
+func fullDigest() *run.Digest {
 	now := time.Date(2026, 11, 13, 4, 0, 0, 0, time.UTC)
-	d := &run.Digest{
+	last := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	return &run.Digest{
 		Schema: "whyfail/v1",
 		Job: &run.JobInfo{Name: "pull-ci-org-repo-main-e2e", Health: &health.Summary{
 			Job: "pull-ci-org-repo-main-e2e", Pass: 19, Fail: 122, Abort: 34, Runs: 175,
-			PassRate: 0.135, From: now.AddDate(0, 0, -60), Verdict: health.VerdictFlaky,
+			PassRate: 0.135, From: now.AddDate(0, 0, -60), LastPass: &last, Verdict: health.VerdictFlaky,
 		}},
 		Run: &run.RunInfo{
 			ID: "2123", JobName: "pull-ci-org-repo-main-e2e", Result: "failure",
@@ -154,7 +200,12 @@ func TestDigestRendersFullRun(t *testing.T) {
 		},
 		Artifacts: &run.Artifacts{
 			TotalBytes: 12345678, Count: 42,
-			Notable: []run.Notable{{Short: "build-log.txt", Bytes: 2048, Why: "orchestration timeline"}},
+			Notable: []run.Notable{
+				{Short: "prowjob.json", Bytes: 2048, Why: "run identity and PR linkage"},
+				{Short: "build-log.txt", Bytes: 64000, Why: "orchestration timeline"},
+				{Short: "artifacts/e2e-flow/build-log.txt", Bytes: 60743, Why: "failing step log"},
+				{Short: "artifacts/e2e-flow/artifacts/junit/junit_e2e.xml", Bytes: 4096, Why: "JUnit e2e results"},
+			},
 		},
 		Signals: &run.Signals{
 			Sippy:    "not tracked",
@@ -162,27 +213,12 @@ func TestDigestRendersFullRun(t *testing.T) {
 		},
 		NextAction: "retest",
 	}
+}
 
+func TestDigestGolden(t *testing.T) {
 	var buf bytes.Buffer
-	Digest(&buf, d)
-	out := buf.String()
-
-	for _, want := range []string{
-		"FLAKY", "2123", "FAILURE  5m00s", "50% of 10m00s timeout",
-		"org/repo#2364", "by alice", `"fix"`, "cluster build01", "ns ci-op-abcdefgh",
-		"reason: step failed", "steps (19): 1 failed", "e2e-flow", "longest: install 2m00s",
-		"tests: 247 pass / 3 fail / 497 skip / 1 flaked", "[extension]",
-		"BLOCK", "[Late] Prometheus targets", "inform", "informing test",
-		"monitors: 4 failures in 1 cause(s)", "[4x] dns lookup failed: thanos",
-		"infra: profile=ipi/aws", "slice=240", "machines=6", "INSTALL FAILED",
-		"ci-operator: success=false errors=1", "artifacts: 42 objects",
-		"build-log.txt", "sippy=not tracked", "search.ci=7 matches in 48h", "OCPBUGS-1",
-		"next: retest", "url:  https://prow.ci.openshift.org/view/gs/b/p",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("digest output missing %q\n---\n%s", want, out)
-		}
-	}
+	Digest(&buf, fullDigest(), testStyle())
+	golden(t, "digest-full.txt", buf.String())
 }
 
 func TestDigestMinimalRun(t *testing.T) {
@@ -191,13 +227,11 @@ func TestDigestMinimalRun(t *testing.T) {
 			URL: "https://prow.ci.openshift.org/view/gs/b/p"},
 	}
 	var buf bytes.Buffer
-	Digest(&buf, d)
+	Digest(&buf, d, testStyle())
 	out := buf.String()
+	golden(t, "digest-minimal.txt", out)
 	if !strings.HasPrefix(out, "periodic-x\n") {
 		t.Errorf("expected bare job name header, got %q", out)
-	}
-	if strings.Contains(out, "tests:") || strings.Contains(out, "steps") {
-		t.Errorf("unexpected optional sections: %q", out)
 	}
 }
 
@@ -209,10 +243,40 @@ func TestDigestFallsBackToMonitorGroups(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	Digest(&buf, d)
-	if !strings.Contains(buf.String(), "monitors: 2 failures in 1 cause(s)") {
-		t.Errorf("got %q", buf.String())
+	Digest(&buf, d, testStyle())
+	out := buf.String()
+	golden(t, "digest-monitors.txt", out)
+	if !strings.Contains(out, "2 failures · 1 cause") {
+		t.Errorf("got %q", out)
 	}
+}
+
+func TestDigestNarrowWidth(t *testing.T) {
+	var buf bytes.Buffer
+	Digest(&buf, fullDigest(), term.Config(&buf, "never", 60))
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.HasPrefix(line, "  URL") {
+			continue // the URL is printed whole so it stays copyable
+		}
+		if n := term.Visible(line); n > 60 {
+			t.Errorf("line is %d columns wide at width 60: %q", n, line)
+		}
+	}
+}
+
+func TestFailuresGolden(t *testing.T) {
+	tests := &run.Tests{
+		Counts: run.TestCounts{Passed: 10},
+		Failed: []run.TestFailure{
+			{Name: "[sig-x] thing", Blocking: true, Error: "boom\nsecond line"},
+			{Name: "informant", Lifecycle: "informing"},
+		},
+		Monitors: []run.TestFailure{{Name: "monitor-a"}},
+	}
+	var buf bytes.Buffer
+	Failures(&buf, testStyle(), "pull-ci-org-repo-main-e2e", "failure",
+		[]run.StepRef{{Name: "e2e-flow", DurationS: 60}}, tests)
+	golden(t, "failures.txt", buf.String())
 }
 
 func TestJobCard(t *testing.T) {
@@ -251,16 +315,29 @@ func TestJobCard(t *testing.T) {
 	}
 	for _, c := range cases {
 		var buf bytes.Buffer
-		Job(&buf, &c.s)
+		Job(&buf, &c.s, testStyle())
 		if !strings.Contains(buf.String(), c.want) {
 			t.Errorf("%s: missing %q in %q", c.name, c.want, buf.String())
 		}
 	}
 }
 
+func TestJobGolden(t *testing.T) {
+	from := time.Date(2026, 9, 17, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+	last := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	Job(&buf, &health.Summary{
+		Job: "pull-ci-org-repo-main-e2e", Runs: 154, Pass: 98, Fail: 56,
+		PassRate: 0.638, RecentPassRate: 0.61, Streak: 2, LastPass: &last,
+		DistinctPRs: 9, From: from, To: to, Verdict: health.VerdictFlaky,
+	}, testStyle())
+	golden(t, "job-flaky.txt", buf.String())
+}
+
 func TestGainEmptyAndPopulated(t *testing.T) {
 	var buf bytes.Buffer
-	Gain(&buf, stats.Aggregate{}, 4, 0)
+	Gain(&buf, stats.Aggregate{}, 4, 0, testStyle())
 	if !strings.Contains(buf.String(), "no recorded calls yet") {
 		t.Fatalf("empty: %q", buf.String())
 	}
@@ -275,7 +352,7 @@ func TestGainEmptyAndPopulated(t *testing.T) {
 		Top:    []stats.Record{{Cmd: "run", Target: "job/1", ReadBytes: 1000, EmittedBytes: 100}},
 	}
 	buf.Reset()
-	Gain(&buf, a, 4, 10*time.Minute)
+	Gain(&buf, a, 4, 10*time.Minute, testStyle())
 	out := buf.String()
 	for _, want := range []string{
 		"saved", "2 calls", "since 2026-10-14", "10.0% of input",
@@ -286,4 +363,5 @@ func TestGainEmptyAndPopulated(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
 	}
+	golden(t, "gain.txt", out)
 }

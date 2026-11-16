@@ -1,0 +1,14 @@
+whyfail saved ~900 B across 2 calls (since 2026-10-14)
+
+  calls                 2   ·  cache hits 1
+  read                  1000 B → 100 B emitted (10.0% of input)
+  full trees            4.9 KB   (upper bound, not all of it would be read)
+  ~tokens saved         225
+  ~manual time saved    19m59s   (vs 10m0s baseline per call; modelled)
+
+(measured numbers come from recorded calls; ~ marks modelled estimates)
+
+  run                   2 calls · 1000 B read
+
+top saves
+      900 B  run   job/1

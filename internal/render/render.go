@@ -4,6 +4,7 @@ package render
 import (
 	"fmt"
 	"io"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -11,7 +12,14 @@ import (
 	"github.com/sebrandon1/whyfail/internal/health"
 	"github.com/sebrandon1/whyfail/internal/run"
 	"github.com/sebrandon1/whyfail/internal/stats"
+	"github.com/sebrandon1/whyfail/internal/term"
 )
+
+// gutter is the width of the label column; "ARTIFACTS" is the widest label.
+const gutter = 9
+
+// rowIndent aligns continuation lines under the first value column.
+var rowIndent = strings.Repeat(" ", 2+gutter+1)
 
 // VerdictLabel returns an icon and short label for a health verdict.
 func VerdictLabel(v health.Verdict) (string, string) {
@@ -29,223 +37,560 @@ func VerdictLabel(v health.Verdict) (string, string) {
 	}
 }
 
+// verdictStyle paints s according to the verdict.
+func verdictStyle(st term.Style, v health.Verdict, s string) string {
+	switch v {
+	case health.VerdictBroken:
+		return st.Red(s)
+	case health.VerdictFlaky:
+		return st.Yellow(s)
+	case health.VerdictHealthy:
+		return st.Green(s)
+	case health.VerdictDegraded:
+		return st.Blue(s)
+	default:
+		return st.Dim(s)
+	}
+}
+
+// VerdictText paints s with the colour that belongs to verdict v.
+func VerdictText(st term.Style, v health.Verdict, s string) string {
+	return verdictStyle(st, v, s)
+}
+
+func resultStyle(st term.Style, result string) string {
+	switch strings.ToUpper(result) {
+	case "SUCCESS":
+		return st.Green(strings.ToUpper(result))
+	case "FAILURE":
+		return st.Red(strings.ToUpper(result))
+	case "ABORTED":
+		return st.Yellow(strings.ToUpper(result))
+	default:
+		return strings.ToUpper(result)
+	}
+}
+
+// row writes one label/value pair.
+func row(w io.Writer, st term.Style, name, value string) {
+	fmt.Fprintf(w, "  %s %s\n", st.Dim(term.PadRight(name, gutter)), value)
+}
+
+// rowStyled writes a labelled row, folding the value to the terminal width and
+// painting every resulting line.
+func rowStyled(w io.Writer, st term.Style, name, value string, paint func(string) string) {
+	if term.Visible(value) <= st.Width()-len(rowIndent) && !strings.Contains(value, "\n") {
+		fmt.Fprintf(w, "  %s %s\n", st.Dim(term.PadRight(name, gutter)), paint(value))
+		return
+	}
+	lines := term.Wrap(value, rowIndent, st.Width())
+	fmt.Fprintf(w, "  %s %s\n", st.Dim(term.PadRight(name, gutter)), paint(strings.TrimPrefix(lines[0], rowIndent)))
+	for _, l := range lines[1:] {
+		fmt.Fprintln(w, paint(l))
+	}
+}
+
+// fit truncates s so it fits on a labelled row.
+func fit(st term.Style, s string) string {
+	return term.Trunc(s, st.Width()-len(rowIndent))
+}
+
+// grow writes a labelled row with the wider gutter the savings card needs.
+func grow(w io.Writer, st term.Style, name, value string) {
+	fmt.Fprintf(w, "  %s %s\n", st.Dim(term.PadRight(name, 21)), value)
+}
+
+// plural returns one when n is exactly one, otherwise many.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+func stepNames(refs []run.StepRef) []string {
+	out := make([]string, len(refs))
+	for i, r := range refs {
+		out[i] = r.Name
+	}
+	return out
+}
+
+func testNames(fs []run.TestFailure) []string {
+	out := make([]string, len(fs))
+	for i, f := range fs {
+		out[i] = f.Name
+	}
+	return out
+}
+
+// excerptLines caps how much of a test error is shown; the whole thing is in
+// --json and in the artifact log.
+const excerptLines = 2
+
+// writeExcerpt prints the first few lines of an error, folded to the width.
+func writeExcerpt(w io.Writer, st term.Style, err, indent string) {
+	if err == "" {
+		return
+	}
+	lines := term.Wrap(err, indent, st.Width())
+	more := 0
+	if len(lines) > excerptLines {
+		more = len(lines) - excerptLines
+		lines = lines[:excerptLines]
+	}
+	for _, l := range lines {
+		fmt.Fprintln(w, st.Dim(l))
+	}
+	if more > 0 {
+		fmt.Fprintf(w, "%s%s\n", indent, st.Dim(fmt.Sprintf("… (%d more %s in --json)",
+			more, plural(more, "line", "lines"))))
+	}
+}
+
+// nameWidth is the column width that fits the longest name without pushing the
+// rest of the row past the terminal width.
+func nameWidth(st term.Style, names []string, reserved int) int {
+	widest := 0
+	for _, n := range names {
+		if v := term.Visible(n); v > widest {
+			widest = v
+		}
+	}
+	if limit := st.Width() - reserved; widest > limit {
+		widest = limit
+	}
+	if widest < 12 {
+		widest = 12
+	}
+	return widest
+}
+
+// verdictLine writes the icon, verdict and a dim, width-folded summary.
+func verdictLine(w io.Writer, st term.Style, v health.Verdict, blurb string) {
+	icon, label := VerdictLabel(v)
+	const hang = 12 // icon + space + padded label + two spaces
+	indent := strings.Repeat(" ", hang)
+	lines := term.Wrap(blurb, indent, st.Width())
+	fmt.Fprintf(w, "%s %s  %s\n",
+		verdictStyle(st, v, icon),
+		verdictStyle(st, v, term.PadRight(label, 8)),
+		st.Dim(strings.TrimPrefix(lines[0], indent)))
+	for _, l := range lines[1:] {
+		fmt.Fprintln(w, st.Dim(l))
+	}
+}
+
 // Digest writes a human-readable digest.
-func Digest(w io.Writer, d *run.Digest) {
+func Digest(w io.Writer, d *run.Digest, st term.Style) {
+	r := d.Run
+	fmt.Fprintln(w, st.Bold(r.JobName))
 	if d.Job != nil && d.Job.Health != nil {
 		h := d.Job.Health
-		icon, label := VerdictLabel(h.Verdict)
-		fmt.Fprintf(w, "%-36s %s %s", d.Run.JobName, icon, label)
+		var parts []string
 		if h.Pass+h.Fail > 0 {
-			fmt.Fprintf(w, "  (%s pass, %d runs since %s)",
-				health.FormatRate(h.PassRate), h.Runs, h.From.Format("2006-01-02"))
+			parts = append(parts, health.FormatRate(h.PassRate)+" pass")
 		}
-		fmt.Fprintln(w)
-	} else {
-		fmt.Fprintln(w, d.Run.JobName)
-	}
-
-	fmt.Fprintf(w, "run %s  %s", d.Run.ID, strings.ToUpper(d.Run.Result))
-	if d.Run.Timing.DurationS > 0 {
-		fmt.Fprintf(w, "  %s", FormatDuration(d.Run.Timing.DurationS))
-		if d.Run.Timing.TimeoutS > 0 {
-			fmt.Fprintf(w, " (%.0f%% of %s timeout)", d.Run.Timing.PctOfTimeout, FormatDuration(d.Run.Timing.TimeoutS))
+		if h.Runs > 0 {
+			parts = append(parts, fmt.Sprintf("%d runs since %s", h.Runs, h.From.Format("2006-01-02")))
 		}
+		if h.LastPass != nil {
+			parts = append(parts, "last pass "+h.LastPass.Format("2006-01-02"))
+		}
+		verdictLine(w, st, h.Verdict, strings.Join(parts, " · "))
 	}
 	fmt.Fprintln(w)
 
-	if pr := d.Run.PR; pr != nil && pr.Number != 0 {
-		fmt.Fprintf(w, "pr   %s/%s#%d", pr.Org, pr.Repo, pr.Number)
+	writeRunRows(w, st, r)
+	writeSteps(w, st, r.Steps)
+	writeTests(w, st, d.Tests)
+	writeInfra(w, st, d.Infra)
+	writeArtifacts(w, st, d.Artifacts)
+	writeSignals(w, st, d.Signals)
+
+	fmt.Fprintln(w)
+	if d.NextAction != "" {
+		row(w, st, "NEXT", d.NextAction)
+	}
+	fmt.Fprintf(w, "  %s %s\n", st.Dim(term.PadRight("URL", gutter)), st.Dim(r.URL))
+}
+
+func writeRunRows(w io.Writer, st term.Style, r *run.RunInfo) {
+	var runParts []string
+	runParts = append(runParts, r.ID)
+	if r.Result != "" {
+		runParts = append(runParts, resultStyle(st, r.Result))
+	}
+	if r.Timing.DurationS > 0 {
+		p := FormatDuration(r.Timing.DurationS)
+		if r.Timing.TimeoutS > 0 {
+			p += fmt.Sprintf("   %.0f%% of %s timeout", r.Timing.PctOfTimeout, FormatDuration(r.Timing.TimeoutS))
+		}
+		runParts = append(runParts, p)
+	}
+	row(w, st, "RUN", strings.Join(runParts, "   "))
+
+	if pr := r.PR; pr != nil && pr.Number != 0 {
+		v := st.Cyan(fmt.Sprintf("%s/%s#%d", pr.Org, pr.Repo, pr.Number))
 		if pr.Author != "" {
-			fmt.Fprintf(w, "  by %s", pr.Author)
+			v += "   " + pr.Author
 		}
+		row(w, st, "PR", v)
 		if pr.Title != "" {
-			fmt.Fprintf(w, "  %q", truncate(pr.Title, 90))
+			for _, l := range term.Wrap(`"`+pr.Title+`"`, rowIndent, st.Width()) {
+				fmt.Fprintln(w, st.Dim(l))
+			}
 		}
-		fmt.Fprintln(w)
 	}
 
 	var meta []string
-	if d.Run.Cluster != "" {
-		meta = append(meta, "cluster "+d.Run.Cluster)
+	if r.Cluster != "" {
+		meta = append(meta, r.Cluster)
 	}
-	if d.Run.Namespace != "" {
-		meta = append(meta, "ns "+d.Run.Namespace)
+	if r.Namespace != "" {
+		meta = append(meta, r.Namespace)
 	}
-	if d.Run.RerunCommand != "" {
-		meta = append(meta, d.Run.RerunCommand)
+	if r.RerunCommand != "" {
+		meta = append(meta, r.RerunCommand)
 	}
 	if len(meta) > 0 {
-		fmt.Fprintln(w, "     "+strings.Join(meta, " · "))
+		row(w, st, "CLUSTER", fit(st, strings.Join(meta, " · ")))
 	}
-	if d.Run.Reason != "" {
-		fmt.Fprintln(w, "     reason: "+d.Run.Reason)
+
+	// The reason is the ci-operator's own verdict on why the run failed; show it
+	// before the component findings so it is never below the fold.
+	if r.Reason != "" {
+		row(w, st, "REASON", st.Red(fit(st, r.Reason)))
+	}
+}
+
+func writeSteps(w io.Writer, st term.Style, s run.StepsInfo) {
+	if s.Total == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+st.Rule())
+	failed := st.Dim("0 failed")
+	if n := len(s.Failed); n > 0 {
+		failed = st.Red(fmt.Sprintf("%d failed", n))
+	}
+	row(w, st, "STEPS", fmt.Sprintf("%d total · %s", s.Total, failed))
+
+	nameW := nameWidth(st, stepNames(s.Failed), 5+1+8)
+	for _, f := range s.Failed {
+		fmt.Fprintf(w, "  %s  %s %s\n",
+			st.Red("✗"),
+			term.PadRight(term.TruncMiddle(f.Name, nameW), nameW),
+			st.Dim(term.PadLeft(FormatDuration(f.DurationS), 8)))
+		writeExcerpt(w, st, f.Error, "       ")
+	}
+
+	if len(s.Longest) > 0 {
+		parts := make([]string, 0, len(s.Longest))
+		for _, l := range s.Longest {
+			parts = append(parts, l.Name+" "+FormatDuration(l.DurationS))
+		}
+		lines := term.WrapItems(parts, rowIndent, " · ", st.Width())
+		fmt.Fprintf(w, "  %s %s\n", st.Dim(term.PadRight("LONGEST", gutter)),
+			st.Dim(strings.TrimPrefix(lines[0], rowIndent)))
+		for _, l := range lines[1:] {
+			fmt.Fprintln(w, st.Dim(l))
+		}
+	}
+}
+
+func writeTests(w io.Writer, st term.Style, t *run.Tests) {
+	if t == nil {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+st.Rule())
+
+	v := fmt.Sprintf("%d pass · %d fail · %d skip", t.Counts.Passed, t.Counts.Failed, t.Counts.Skipped)
+	if t.Counts.Flaked > 0 {
+		v += fmt.Sprintf(" · %d flaked", t.Counts.Flaked)
+	}
+	if t.Source != "" {
+		v += "   [" + t.Source + "]"
+	}
+	rowStyled(w, st, "TESTS", v, func(s string) string { return s })
+
+	nameW := nameWidth(st, testNames(t.Failed), 9)
+	for _, f := range t.Failed {
+		label, paint := "inform", st.Dim
+		if f.Blocking {
+			label, paint = "BLOCK", st.Red
+		}
+		fmt.Fprintf(w, "  %s %s\n", paint(term.PadRight(label, 6)), term.Trunc(f.Name, nameW))
+		writeExcerpt(w, st, f.Error, "         ")
+	}
+
+	if len(t.Monitors) > 0 {
+		groups := t.Causes
+		total := t.MonitorTotal
+		if len(groups) == 0 {
+			groups = run.GroupCauses(t.Monitors)
+		}
+		if total == 0 {
+			total = len(t.Monitors)
+		}
+		row(w, st, "MONITORS", fmt.Sprintf("%d %s · %d %s", total, plural(total, "failure", "failures"), len(groups), plural(len(groups), "cause", "causes")))
+		for i, g := range groups {
+			if i >= 6 {
+				fmt.Fprintf(w, "  %s\n", st.Dim(fmt.Sprintf("… and %d more causes", len(groups)-6)))
+				break
+			}
+			fmt.Fprintf(w, "  %s  %s\n",
+				st.Dim(fmt.Sprintf("%3d×", g.Count)),
+				term.TruncMiddle(g.Signature, st.Width()-8))
+		}
+	}
+}
+
+func writeInfra(w io.Writer, st term.Style, in *run.Infra) {
+	if in == nil {
+		return
+	}
+	var parts []string
+	if in.ClusterProfile != "" {
+		parts = append(parts, "profile="+in.ClusterProfile)
+	}
+	if in.Region != "" {
+		parts = append(parts, "region="+in.Region)
+	}
+	if in.Lease != nil {
+		if in.Lease.Slice != "" {
+			parts = append(parts, "slice="+in.Lease.Slice)
+		}
+		parts = append(parts, fmt.Sprintf("avail=%d", in.Lease.AvailableAtAcquire))
+		if in.Lease.AcquireS > 0 {
+			parts = append(parts, fmt.Sprintf("acquire=%.1fs", in.Lease.AcquireS))
+		}
+	}
+	if in.MachinesTotal > 0 {
+		parts = append(parts, fmt.Sprintf("machines=%d", in.MachinesTotal))
+	}
+	if in.Variant != "" {
+		parts = append(parts, "variant="+in.Variant)
+	}
+	if in.InstallFailed {
+		parts = append(parts, "INSTALL FAILED")
+	}
+	if len(parts) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "  "+st.Rule())
+		paint := st.Dim
+		if in.InstallFailed {
+			paint = st.Red
+		}
+		rowStyled(w, st, "INFRA", strings.Join(parts, " · "), paint)
+		if in.Execution != nil {
+			row(w, st, "", st.Dim(fmt.Sprintf("ci-operator success=%v · %d %s · %s",
+				in.Execution.Success, in.Execution.ErrorCount,
+				plural(in.Execution.ErrorCount, "error", "errors"),
+				FormatDuration(in.Execution.DurationS))))
+		}
+	}
+}
+
+func writeArtifacts(w io.Writer, st term.Style, a *run.Artifacts) {
+	if a == nil || a.Count == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+st.Rule())
+
+	names := notableNames(a.Notable)
+	prefix := commonDir(names)
+	v := fmt.Sprintf("%d objects · %s", a.Count, FormatBytes(a.TotalBytes))
+	if prefix != "" {
+		v += "   " + st.Dim("(prefix "+term.TruncMiddle(prefix+"/", 46)+")")
+	}
+	row(w, st, "ARTIFACTS", v)
+
+	const maxShown = 5
+	shown := a.Notable
+	if len(shown) > maxShown {
+		shown = shown[:maxShown]
+	}
+	rel := make([]string, len(shown))
+	maxName, maxWhy := 0, 0
+	for i, n := range shown {
+		rel[i] = notableName(n)
+		if prefix != "" {
+			rel[i] = strings.TrimPrefix(rel[i], prefix+"/")
+		}
+		if w := term.Visible(rel[i]); w > maxName {
+			maxName = w
+		}
+		if w := term.Visible(n.Why); w > maxWhy {
+			maxWhy = w
+		}
+	}
+	budget := st.Width() - (2 + 9 + 2 + 1)
+	if budget < 20 {
+		budget = 20
+	}
+	whyW := maxWhy
+	if whyW > budget/2 {
+		whyW = budget / 2
+	}
+	nameW := budget - whyW
+	if nameW > maxName {
+		nameW = maxName
+	}
+	for i, n := range shown {
+		fmt.Fprintf(w, "  %s  %s %s\n",
+			st.Dim(term.PadLeft(FormatBytes(n.Bytes), 9)),
+			term.PadRight(term.TruncMiddle(rel[i], nameW), nameW),
+			st.Dim(term.TruncMiddle(n.Why, whyW)))
+	}
+	if rest := len(a.Notable) - len(shown); rest > 0 {
+		fmt.Fprintf(w, "  %s\n", st.Dim(fmt.Sprintf("… and %d more notable · --json for the full inventory", rest)))
+	}
+}
+
+func writeSignals(w io.Writer, st term.Style, s *run.Signals) {
+	if s == nil {
+		return
+	}
+	var parts []string
+	if s.Sippy != "" {
+		parts = append(parts, "sippy="+s.Sippy)
+	}
+	if c := s.SearchCI; c != nil {
+		p := fmt.Sprintf("search.ci=%d matches in 48h", c.Matches48h)
+		if c.KnownBug != "" {
+			p += " (" + c.KnownBug + ")"
+		}
+		parts = append(parts, p)
+	}
+	if len(parts) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	rowStyled(w, st, "SIGNALS", strings.Join(parts, " · "), st.Dim)
+}
+
+func notableName(n run.Notable) string {
+	if n.Short != "" {
+		return n.Short
+	}
+	return n.Name
+}
+
+func notableNames(ns []run.Notable) []string {
+	out := make([]string, len(ns))
+	for i, n := range ns {
+		out[i] = notableName(n)
+	}
+	return out
+}
+
+// commonDir returns the deepest directory shared by every name, or "".
+func commonDir(names []string) string {
+	if len(names) < 2 {
+		return ""
+	}
+	prefix := path.Dir(names[0])
+	for _, n := range names {
+		for prefix != "" && !strings.HasPrefix(n, prefix+"/") {
+			prefix = path.Dir(prefix)
+			if prefix == "." || prefix == "/" {
+				prefix = ""
+			}
+		}
+	}
+	if prefix == "." {
+		return ""
+	}
+	return prefix
+}
+
+// Failures writes only the failed steps and tests of a run.
+func Failures(w io.Writer, st term.Style, jobName, result string, steps []run.StepRef, tests *run.Tests) {
+	fmt.Fprintln(w, st.Bold(jobName), resultStyle(st, result))
+	if len(steps) == 0 && (tests == nil || (len(tests.Failed) == 0 && len(tests.Monitors) == 0)) {
+		fmt.Fprintln(w)
+		row(w, st, "STEPS", st.Green("none failed"))
+		return
 	}
 	fmt.Fprintln(w)
 
-	if s := d.Run.Steps; s.Total > 0 {
-		fmt.Fprintf(w, "steps (%d): %d failed\n", s.Total, len(s.Failed))
-		for _, f := range s.Failed {
-			fmt.Fprintf(w, "  ✗ %-56s %8s\n", f.Name, FormatDuration(f.DurationS))
-			if f.Error != "" {
-				fmt.Fprintf(w, "      %s\n", truncate(f.Error, 150))
-			}
-		}
-		if len(s.Longest) > 0 {
-			var parts []string
-			for _, l := range s.Longest {
-				parts = append(parts, fmt.Sprintf("%s %s", l.Name, FormatDuration(l.DurationS)))
-			}
-			fmt.Fprintf(w, "  longest: %s\n", strings.Join(parts, " · "))
+	if len(steps) > 0 {
+		row(w, st, "STEPS", st.Red(fmt.Sprintf("%d failed", len(steps))))
+		nameW := nameWidth(st, stepNames(steps), 5+1+8)
+		for _, s := range steps {
+			fmt.Fprintf(w, "  %s  %s %s\n",
+				st.Red("✗"),
+				term.PadRight(term.TruncMiddle(s.Name, nameW), nameW),
+				st.Dim(term.PadLeft(FormatDuration(s.DurationS), 8)))
 		}
 		fmt.Fprintln(w)
 	}
-
-	if t := d.Tests; t != nil {
-		fmt.Fprintf(w, "tests: %d pass / %d fail / %d skip", t.Counts.Passed, t.Counts.Failed, t.Counts.Skipped)
-		if t.Counts.Flaked > 0 {
-			fmt.Fprintf(w, " / %d flaked", t.Counts.Flaked)
-		}
-		if t.Source != "" {
-			fmt.Fprintf(w, "  [%s]", t.Source)
-		}
-		fmt.Fprintln(w)
-		for _, f := range t.Failed {
-			label := "inform"
-			if f.Blocking {
-				label = "BLOCK"
-			}
-			fmt.Fprintf(w, "  %-6s %s\n", label, truncate(f.Name, 110))
-			if f.Error != "" {
-				for _, line := range strings.Split(f.Error, "\n") {
-					fmt.Fprintf(w, "         %s\n", truncate(line, 130))
-				}
-			}
-		}
-		if len(t.Monitors) > 0 {
-			groups := t.Causes
-			total := t.MonitorTotal
-			if len(groups) == 0 {
-				groups = run.GroupCauses(t.Monitors)
-			}
-			if total == 0 {
-				total = len(t.Monitors)
-			}
-			fmt.Fprintf(w, "monitors: %d failures in %d cause(s)\n", total, len(groups))
-			for i, g := range groups {
-				if i >= 6 {
-					fmt.Fprintf(w, "  ... and %d more cause(s)\n", len(groups)-6)
-					break
-				}
-				fmt.Fprintf(w, "  [%dx] %s\n", g.Count, truncate(g.Signature, 120))
-			}
-		}
-		fmt.Fprintln(w)
+	if tests == nil {
+		return
 	}
-
-	if in := d.Infra; in != nil {
-		var parts []string
-		if in.ClusterProfile != "" {
-			parts = append(parts, "profile="+in.ClusterProfile)
+	for _, f := range tests.Failed {
+		label, paint := "inform", st.Dim
+		if f.Blocking {
+			label, paint = "BLOCK", st.Red
 		}
-		if in.Region != "" {
-			parts = append(parts, "region="+in.Region)
-		}
-		if in.Lease != nil {
-			if in.Lease.Slice != "" {
-				parts = append(parts, "slice="+in.Lease.Slice)
-			}
-			parts = append(parts, fmt.Sprintf("available_at_acquire=%d", in.Lease.AvailableAtAcquire))
-			if in.Lease.AcquireS > 0 {
-				parts = append(parts, fmt.Sprintf("acquire=%.1fs", in.Lease.AcquireS))
-			}
-		}
-		if in.MachinesTotal > 0 {
-			parts = append(parts, fmt.Sprintf("machines=%d", in.MachinesTotal))
-		}
-		if in.Variant != "" {
-			parts = append(parts, "variant="+in.Variant)
-		}
-		if in.InstallFailed {
-			parts = append(parts, "INSTALL FAILED")
-		}
-		if len(parts) > 0 {
-			fmt.Fprintln(w, "infra: "+strings.Join(parts, " · "))
-		}
-		if in.Execution != nil {
-			fmt.Fprintf(w, "       ci-operator: success=%v errors=%d duration=%s\n",
-				in.Execution.Success, in.Execution.ErrorCount, FormatDuration(in.Execution.DurationS))
-		}
-		fmt.Fprintln(w)
+		fmt.Fprintf(w, "  %s %s\n", paint(term.PadRight(label, 6)), term.Trunc(f.Name, st.Width()-9))
+		writeExcerpt(w, st, f.Error, "         ")
 	}
-
-	if a := d.Artifacts; a != nil && a.Count > 0 {
-		fmt.Fprintf(w, "artifacts: %d objects, %s total\n", a.Count, FormatBytes(a.TotalBytes))
-		for _, n := range a.Notable {
-			name := n.Short
-			if name == "" {
-				name = n.Name
-			}
-			fmt.Fprintf(w, "  %-10s %s (%s)\n", FormatBytes(n.Bytes), truncate(name, 90), n.Why)
-		}
-		fmt.Fprintln(w)
-	}
-
-	if d.Signals != nil {
-		var parts []string
-		if d.Signals.Sippy != "" {
-			parts = append(parts, "sippy="+d.Signals.Sippy)
-		}
-		if s := d.Signals.SearchCI; s != nil {
-			p := fmt.Sprintf("search.ci=%d matches in 48h", s.Matches48h)
-			if s.KnownBug != "" {
-				p += " (" + s.KnownBug + ")"
-			}
-			parts = append(parts, p)
-		}
-		if len(parts) > 0 {
-			fmt.Fprintln(w, "signals: "+strings.Join(parts, " · "))
+	if len(tests.Monitors) > 0 {
+		row(w, st, "MONITORS", fmt.Sprintf("%d failed", len(tests.Monitors)))
+		for _, f := range tests.Monitors {
+			fmt.Fprintf(w, "  %s  %s\n", st.Dim("monitor"), term.TruncMiddle(f.Name, st.Width()-10))
 		}
 	}
-
-	if d.NextAction != "" {
-		fmt.Fprintln(w, "next: "+d.NextAction)
-	}
-	fmt.Fprintln(w, "url:  "+d.Run.URL)
 }
 
 // Job writes a job health card.
-func Job(w io.Writer, s *health.Summary) {
-	icon, label := VerdictLabel(s.Verdict)
-	fmt.Fprintf(w, "%s  %s %s\n", s.Job, icon, label)
+func Job(w io.Writer, s *health.Summary, st term.Style) {
+	fmt.Fprintln(w, st.Bold(s.Job))
 	if s.Runs == 0 {
-		fmt.Fprintln(w, "  no runs found in the Prow index (job may be renamed or never have run)")
+		row(w, st, "WINDOW", st.Dim("no runs found in the Prow index (job may be renamed or never have run)"))
 		return
 	}
-	fmt.Fprintf(w, "  window %s → %s · %d runs · %d pass / %d fail / %d abort / %d missing\n",
-		s.From.Format("2006-01-02"), s.To.Format("2006-01-02"), s.Runs, s.Pass, s.Fail, s.Abort, s.Missing)
-	fmt.Fprintf(w, "  pass rate %s (recent %s) · streak %d · ",
-		health.FormatRate(s.PassRate), health.FormatRate(s.RecentPassRate), s.Streak)
+
+	verdictLine(w, st, s.Verdict, fmt.Sprintf("%s pass · %d runs · %s → %s",
+		health.FormatRate(s.PassRate), s.Runs,
+		s.From.Format("2006-01-02"), s.To.Format("2006-01-02")))
+	fmt.Fprintln(w)
+
+	row(w, st, "RUNS", fmt.Sprintf("%d total · %d pass · %d fail · %d abort · %d missing",
+		s.Runs, s.Pass, s.Fail, s.Abort, s.Missing))
+	rowStyled(w, st, "RATE", fmt.Sprintf("%s · recent %s · streak %d",
+		health.FormatRate(s.PassRate), health.FormatRate(s.RecentPassRate), s.Streak),
+		func(v string) string { return v })
 	if s.LastPass != nil {
-		fmt.Fprintf(w, "last pass %s", s.LastPass.Format("2006-01-02"))
+		row(w, st, "LAST PASS", s.LastPass.Format("2006-01-02"))
 	} else {
-		fmt.Fprint(w, "last pass: none in window")
+		row(w, st, "LAST PASS", st.Dim("none in window"))
 	}
 	if s.DistinctPRs > 0 {
-		fmt.Fprintf(w, " · %d distinct PRs failing", s.DistinctPRs)
+		row(w, st, "FLAKY PRS", fmt.Sprintf("%d distinct %s failing", s.DistinctPRs, plural(s.DistinctPRs, "PR is", "PRs are")))
 	}
-	fmt.Fprintln(w)
+
+	var advice string
 	switch s.Verdict {
 	case health.VerdictBroken:
-		fmt.Fprintln(w, "  → retesting will not help; this job is red for everyone")
+		advice = "retesting will not help; this job is red for everyone"
 	case health.VerdictFlaky:
-		fmt.Fprintln(w, "  → a retest is reasonable")
+		advice = "a retest is reasonable"
 	case health.VerdictHealthy:
-		fmt.Fprintln(w, "  → this job passes reliably")
+		advice = "this job passes reliably"
+	}
+	if advice != "" {
+		fmt.Fprintln(w)
+		row(w, st, "NEXT", verdictStyle(st, s.Verdict, advice))
 	}
 }
 
 // Gain writes the savings summary.
-func Gain(w io.Writer, a stats.Aggregate, bytesPerToken int, baseline time.Duration) {
+func Gain(w io.Writer, a stats.Aggregate, bytesPerToken int, baseline time.Duration, st term.Style) {
 	if a.Totals.Calls == 0 {
 		fmt.Fprintln(w, "no recorded calls yet")
 		return
@@ -254,37 +599,41 @@ func Gain(w io.Writer, a stats.Aggregate, bytesPerToken int, baseline time.Durat
 	if savedBytes < 0 {
 		savedBytes = 0
 	}
-	fmt.Fprintf(w, "whyfail saved ~%s across %d calls", FormatBytes(savedBytes), a.Totals.Calls)
+	fmt.Fprintf(w, "%s ~%s across %d calls", st.Bold("whyfail saved"), st.Bold(FormatBytes(savedBytes)), a.Totals.Calls)
 	if !a.Since.IsZero() {
 		fmt.Fprintf(w, " (since %s)", a.Since.Format("2006-01-02"))
 	}
+	fmt.Fprintln(w)
 	fmt.Fprintln(w)
 
 	pct := 0.0
 	if a.Totals.ReadBytes > 0 {
 		pct = float64(a.Totals.EmittedBytes) / float64(a.Totals.ReadBytes) * 100
 	}
-	fmt.Fprintf(w, "\n  calls          %6d        cache hits %d\n", a.Totals.Calls, a.Totals.CacheHits)
-	fmt.Fprintf(w, "  artifacts read %10s → emitted %8s (%.1f%% of input)\n",
-		FormatBytes(a.Totals.ReadBytes), FormatBytes(a.Totals.EmittedBytes), pct)
+	grow(w, st, "calls", fmt.Sprintf("%d   ·  cache hits %d", a.Totals.Calls, a.Totals.CacheHits))
+	grow(w, st, "read", fmt.Sprintf("%s → %s emitted (%.1f%% of input)",
+		FormatBytes(a.Totals.ReadBytes), FormatBytes(a.Totals.EmittedBytes), pct))
 	if a.Totals.InventoryBytes > 0 {
-		fmt.Fprintf(w, "  full trees     %10s      (upper bound, not all of it would be read)\n", FormatBytes(a.Totals.InventoryBytes))
+		grow(w, st, "full trees", fmt.Sprintf("%s   %s", FormatBytes(a.Totals.InventoryBytes),
+			st.Dim("(upper bound, not all of it would be read)")))
 	}
 	tokens := savedBytes / int64(max(bytesPerToken, 1))
-	fmt.Fprintf(w, "  ~tokens saved  %10s\n", FormatCount(tokens))
+	grow(w, st, "~tokens saved", st.Yellow(FormatCount(tokens)))
 
 	if dl := downloadSeconds(a); dl > 0 {
-		fmt.Fprintf(w, "  ~download time saved %s (measured throughput)\n", FormatDuration(dl))
+		grow(w, st, "~download time saved", fmt.Sprintf("%s   %s", FormatDuration(dl), st.Dim("(measured throughput)")))
 	}
 	if baseline > 0 {
 		manual := time.Duration(a.Totals.Calls) * baseline
 		tool := time.Duration(a.Totals.WallMS) * time.Millisecond
 		if manual > tool {
-			fmt.Fprintf(w, "  ~manual time saved   %s (vs %s baseline per call; modelled)\n",
-				FormatDuration((manual - tool).Seconds()), baseline)
+			grow(w, st, "~manual time saved", fmt.Sprintf("%s   %s",
+				FormatDuration((manual-tool).Seconds()),
+				st.Dim("(vs "+baseline.String()+" baseline per call; modelled)")))
 		}
 	}
-	fmt.Fprintln(w, "\n  (measured numbers come from recorded calls; ~ marks modelled estimates)")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, st.Dim("(measured numbers come from recorded calls; ~ marks modelled estimates)"))
 
 	if len(a.Groups) > 0 {
 		keys := make([]string, 0, len(a.Groups))
@@ -299,13 +648,17 @@ func Gain(w io.Writer, a stats.Aggregate, bytesPerToken int, baseline time.Durat
 			if label == "" {
 				label = "(unknown)"
 			}
-			fmt.Fprintf(w, "  %-40s %4d calls  %10s read\n", label, t.Calls, FormatBytes(t.ReadBytes))
+			grow(w, st, label, fmt.Sprintf("%d calls · %s read", t.Calls, FormatBytes(t.ReadBytes)))
 		}
 	}
 	if len(a.Top) > 0 {
-		fmt.Fprintln(w, "\n  top saves")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, st.Dim("top saves"))
 		for _, r := range a.Top {
-			fmt.Fprintf(w, "    %10s  %-5s %s\n", FormatBytes(r.ReadBytes-r.EmittedBytes), r.Cmd, truncate(r.Target, 90))
+			fmt.Fprintf(w, "  %s  %s %s\n",
+				st.Dim(term.PadLeft(FormatBytes(r.ReadBytes-r.EmittedBytes), 9)),
+				term.PadRight(r.Cmd, 5),
+				term.TruncMiddle(r.Target, st.Width()-18))
 		}
 	}
 }
@@ -363,11 +716,4 @@ func FormatCount(n int64) string {
 	default:
 		return fmt.Sprintf("%d", n)
 	}
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }

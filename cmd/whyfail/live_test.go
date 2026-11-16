@@ -82,7 +82,7 @@ func TestLiveSavingsColdWarm(t *testing.T) {
 	if len(cold) > 8*1024 {
 		t.Errorf("digest is %d bytes, want under 8 KiB", len(cold))
 	}
-	for _, want := range []string{"run 2120987688944275456", "reason:", "next:", "url:"} {
+	for _, want := range []string{"2120987688944275456", "REASON", "NEXT", "URL"} {
 		if !strings.Contains(cold, want) {
 			t.Errorf("digest missing %q", want)
 		}

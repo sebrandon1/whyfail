@@ -1,0 +1,39 @@
+pull-ci-org-repo-main-e2e
+⚠ FLAKY     13.5% pass · 175 runs since 2026-09-14 · last pass 2026-10-01
+
+  RUN       2123   FAILURE   5m00s   50% of 10m00s timeout
+  PR        org/repo#2364   alice
+            "fix"
+  CLUSTER   build01 · ci-op-abcdefgh
+  REASON    step failed
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  STEPS     19 total · 1 failed
+  ✗  e2e-flow        1m00s
+       boom
+  LONGEST   install 2m00s
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  TESTS     247 pass · 3 fail · 497 skip · 1 flaked   [extension]
+  BLOCK  [Late] Prometheus targets
+         targets down
+  inform informing test
+  MONITORS  4 failures · 1 cause
+    4×  dns lookup failed: thanos
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  INFRA     profile=ipi/aws · region=us-east-1 · slice=240 · avail=0 · acquire=1.5s · machines=6 ·
+            variant=amd64 · INSTALL FAILED
+            ci-operator success=false · 1 error · 5m00s
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  ARTIFACTS 42 objects · 11.8 MB
+     2.0 KB  prowjob.json                                     run identity and PR linkage
+    62.5 KB  build-log.txt                                    orchestration timeline
+    59.3 KB  artifacts/e2e-flow/build-log.txt                 failing step log
+     4.0 KB  artifacts/e2e-flow/artifacts/junit/junit_e2e.xml JUnit e2e results
+
+  SIGNALS   sippy=not tracked · search.ci=7 matches in 48h (OCPBUGS-1)
+
+  NEXT      retest
+  URL       https://prow.ci.openshift.org/view/gs/b/p
