@@ -304,6 +304,37 @@ func TestDoctorLocal(t *testing.T) {
 	}
 }
 
+func TestDoctorClaude(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"not installed", `{}`, "not installed (run whyfail init)"},
+		{"plugin", `{"enabledPlugins": {"whyfail@whyfail": true}}`, "installed (whyfail@whyfail, user)"},
+		{"disabled", `{"enabledPlugins": {"whyfail@whyfail": false}}`, "installed but disabled"},
+		{"hooks only", `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "whyfail hook bash"}]}]}}`, "hooks-only"},
+		{"duplicated", `{"enabledPlugins": {"whyfail@whyfail": true}, "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "whyfail hook bash"}]}]}}`, "duplicated"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			if err := os.WriteFile(path, []byte(c.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var buf bytes.Buffer
+			doctorClaude(&buf, term.Config(new(bytes.Buffer), "never", 100), path)
+			out := buf.String()
+			if !strings.HasPrefix(out, "plugin:") {
+				t.Errorf("row does not use the doctor gutter: %q", out)
+			}
+			if !strings.Contains(out, c.want) {
+				t.Errorf("missing %q in %q", c.want, out)
+			}
+		})
+	}
+}
+
 func TestSameFile(t *testing.T) {
 	dir := t.TempDir()
 	real := filepath.Join(dir, "whyfail")
@@ -374,6 +405,7 @@ func TestJSONSchemas(t *testing.T) {
 		{"search", &enrich.SearchResult{Schema: api.SchemaV1}, []string{"query", "matches"}},
 		{"gain", stats.Summarize(nil, "", time.Time{}), []string{"since", "until", "totals"}},
 		{"pr", prOut{Schema: api.SchemaV1}, []string{"pr", "title", "sha", "failing"}},
+		{"init", initOut{Schema: api.SchemaV1}, []string{"scope", "mode", "steps", "ok"}},
 	}
 	for _, c := range cases {
 		b, err := json.Marshal(c.doc)

@@ -24,9 +24,10 @@ lint:
 
 install: build
 	install -m 0755 bin/whyfail $(GOBIN)/whyfail
+	@echo "Installed $(GOBIN)/whyfail. Run 'whyfail init' to install the Claude Code integration."
 
-plugin:
-	@echo "Install the plugin from ./plugin with your Claude Code plugin manager."
+plugin: install
+	$(GOBIN)/whyfail init
 
 clean:
 	rm -rf bin

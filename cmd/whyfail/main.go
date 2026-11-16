@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sebrandon1/whyfail/internal/api"
+	"github.com/sebrandon1/whyfail/internal/claudecfg"
 	"github.com/sebrandon1/whyfail/internal/enrich"
 	"github.com/sebrandon1/whyfail/internal/gcs"
 	"github.com/sebrandon1/whyfail/internal/health"
@@ -83,6 +84,7 @@ func main() {
 	root.AddCommand(
 		newRunCmd(g), newJobCmd(g), newFailuresCmd(g), newLogCmd(g), newArtifactCmd(g),
 		newSearchCmd(g), newGainCmd(g), newHookCmd(), newDoctorCmd(g), newPRCmd(g), newMCPCmd(g),
+		newInitCmd(g),
 	)
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "whyfail:", err)
@@ -703,6 +705,8 @@ func newDoctorCmd(g *globals) *cobra.Command {
 			st := g.style()
 			cacheBytes, cacheFiles, _ := c.CacheSize()
 			doctorLocal(os.Stdout, st, c.CacheDir, cacheBytes, cacheFiles)
+			home, _ := os.UserHomeDir()
+			doctorClaude(os.Stdout, st, filepath.Join(claudecfg.ConfigDir(home), "settings.json"))
 
 			// The probes write as they finish rather than buffering the card, so
 			// a slow endpoint cannot leave the terminal blank.
