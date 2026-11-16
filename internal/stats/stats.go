@@ -75,9 +75,24 @@ func Append(r Record) error {
 	return err
 }
 
-// Load reads every valid record, skipping corrupt lines.
+// Load reads every valid record, skipping corrupt lines. The active file and
+// its rotated predecessor are both read, oldest first, so totals and
+// `--since` windows survive rotation instead of resetting.
 func Load() ([]Record, error) {
-	f, err := os.Open(Path())
+	var out []Record
+	for _, p := range []string{Path() + ".1", Path()} {
+		recs, err := loadFile(p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, recs...)
+	}
+	return dedupe(out), nil
+}
+
+// loadFile reads one stats file. A missing file is not an error.
+func loadFile(path string) ([]Record, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -101,6 +116,33 @@ func Load() ([]Record, error) {
 		out = append(out, r)
 	}
 	return out, sc.Err()
+}
+
+// recordKey identifies one invocation. Two records with the same timestamp,
+// command and target are the same call, whether a rotation or a crash left a
+// copy behind.
+type recordKey struct {
+	ts     time.Time
+	cmd    string
+	target string
+}
+
+// dedupe drops repeated records while preserving order.
+func dedupe(recs []Record) []Record {
+	if len(recs) < 2 {
+		return recs
+	}
+	seen := make(map[recordKey]struct{}, len(recs))
+	out := recs[:0]
+	for _, r := range recs {
+		k := recordKey{ts: r.TS, cmd: r.Cmd, target: r.Target}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, r)
+	}
+	return out
 }
 
 // Totals are summed byte and call counts.

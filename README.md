@@ -174,7 +174,9 @@ it does not verify that the plugin itself is installed.
 
 ## Savings
 
-Every invocation is recorded locally (`~/.cache/whyfail/stats.jsonl`):
+Every invocation is recorded locally (`~/.cache/whyfail/stats.jsonl`). The file is
+rotated to `stats.jsonl.1` at 5 MB, and `gain` reads both, so totals span the last
+two generations rather than resetting:
 
 ```sh
 whyfail gain

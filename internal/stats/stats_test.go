@@ -48,6 +48,95 @@ func TestAppendLoadSummarize(t *testing.T) {
 	}
 }
 
+func TestLoadIncludesRotatedArchive(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WHYFAIL_CACHE_DIR", dir)
+	t.Setenv("WHYFAIL_NO_STATS", "")
+
+	old := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	if err := Append(Record{TS: old, Cmd: "run", Target: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Append(Record{TS: old.Add(time.Hour), Cmd: "job", Target: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate what Append does at the size limit.
+	if err := os.Rename(Path(), Path()+".1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Append(Record{TS: old.Add(2 * time.Hour), Cmd: "run", Target: "c"}); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 3 {
+		t.Fatalf("got %d records, want 3", len(recs))
+	}
+	for i, want := range []string{"a", "b", "c"} {
+		if recs[i].Target != want {
+			t.Errorf("record %d target = %q, want %q (archive must come first)", i, recs[i].Target, want)
+		}
+	}
+	if a := Summarize(recs, "", time.Time{}); a.Totals.Calls != 3 {
+		t.Errorf("totals = %+v", a.Totals)
+	}
+}
+
+func TestLoadDeduplicatesAcrossFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WHYFAIL_CACHE_DIR", dir)
+	t.Setenv("WHYFAIL_NO_STATS", "")
+
+	dup := Record{TS: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC), Cmd: "run", Target: "a"}
+	if err := Append(dup); err != nil {
+		t.Fatal(err)
+	}
+	// Copy rather than rename, so the same record sits in both files.
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path()+".1", data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("got %d records, want 1: %+v", len(recs), recs)
+	}
+}
+
+func TestLoadWithoutFiles(t *testing.T) {
+	t.Setenv("WHYFAIL_CACHE_DIR", t.TempDir())
+	recs, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recs != nil {
+		t.Fatalf("got %+v, want nil", recs)
+	}
+}
+
+func TestLoadReportsUnreadableFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WHYFAIL_CACHE_DIR", dir)
+
+	// A directory where the archive should be makes the scan fail; Load must
+	// surface that rather than silently reporting fewer calls.
+	if err := os.Mkdir(Path()+".1", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(); err == nil {
+		t.Fatal("expected an error reading a directory as the archive")
+	}
+}
+
 func TestDisabled(t *testing.T) {
 	t.Setenv("WHYFAIL_CACHE_DIR", t.TempDir())
 	t.Setenv("WHYFAIL_NO_STATS", "1")
