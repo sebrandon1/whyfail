@@ -71,7 +71,8 @@ Command-specific flags:
 - `run` — `--no-history` (skip the job-health lookup), `--search` (look up the top
   failure signature on search.ci), `--no-sippy` (skip the Sippy coverage probe)
 - `log` — `--tail <n>` (trailing lines, default 120)
-- `artifact` — `--list` (list a prefix instead of reading an object)
+- `artifact` — `--list` (list a prefix instead of reading an object), `--limit <n>`
+  (maximum objects to list, default 200; `0` = all)
 - `search` — `--max-age <dur>` (search window, default `48h`)
 - `gain` — `--history` (recent calls), `--since <dur>`, `--by cmd|repo`
   (aliases: `stats`, `saved`)
