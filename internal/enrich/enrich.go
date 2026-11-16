@@ -10,12 +10,17 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/sebrandon1/whyfail/internal/httpx"
 )
 
 const (
 	SearchEndpoint = "https://search.dptools.openshift.org/search"
 	SippyAPI       = "https://sippy.dptools.openshift.org/api/job/run/summary"
 	userAgent      = "whyfail/dev (+https://github.com/sebrandon1/whyfail)"
+
+	// maxRetries absorbs the transient 429/5xx these endpoints return under load.
+	maxRetries = 2
 )
 
 // SearchResult summarizes how often a signature appears elsewhere.
@@ -47,7 +52,7 @@ func SearchCI(ctx context.Context, hc *http.Client, query, maxAge string) (*Sear
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	resp, err := hc.Do(req)
+	resp, err := httpx.Do(hc, req, maxRetries)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +97,7 @@ func SippyStatus(ctx context.Context, hc *http.Client, runID string) string {
 		return "unknown"
 	}
 	req.Header.Set("User-Agent", userAgent)
-	resp, err := hc.Do(req)
+	resp, err := httpx.Do(hc, req, maxRetries)
 	if err != nil {
 		return "unknown"
 	}
