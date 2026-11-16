@@ -257,6 +257,7 @@ func newRunCmd(g *globals) *cobra.Command {
 			}
 			if d.Job != nil && d.Job.Health != nil {
 				rec.Verdict = string(d.Job.Health.Verdict)
+				rec.PassRate = d.Job.Health.PassRate
 			}
 			g.emit(&buf, rec, c, start)
 			return nil
@@ -318,7 +319,7 @@ func newJobCmd(g *globals) *cobra.Command {
 			// No Repo: a job name alone does not identify a repository — both the
 			// org and the repo may contain the dashes the name is built from — so
 			// this records under (unknown) rather than guessing.
-			g.emit(&buf, stats.Record{Cmd: "job", Target: args[0], Verdict: string(sum.Verdict)}, c, start)
+			g.emit(&buf, stats.Record{Cmd: "job", Target: args[0], Verdict: string(sum.Verdict), PassRate: sum.PassRate}, c, start)
 			return nil
 		},
 	}
@@ -613,6 +614,7 @@ func newGainCmd(g *globals) *cobra.Command {
 	var since string
 	var by string
 	var history bool
+	var fun bool
 	cmd := &cobra.Command{
 		Use:     "gain",
 		Aliases: []string{"stats", "saved"},
@@ -631,6 +633,9 @@ func newGainCmd(g *globals) *cobra.Command {
 				cutoff = time.Now().Add(-d)
 			}
 			agg := stats.Summarize(recs, by, cutoff)
+			if fun {
+				recs = stats.InWindow(recs, cutoff)
+			}
 			var buf bytes.Buffer
 			if history {
 				start := len(recs) - 20
@@ -645,6 +650,9 @@ func newGainCmd(g *globals) *cobra.Command {
 				writeJSON(&buf, agg)
 			} else {
 				render.Gain(&buf, agg, g.bytesPerToken, g.baseline, g.style())
+				if fun {
+					render.Fun(&buf, g.style(), recs)
+				}
 			}
 			_, _ = os.Stdout.Write(buf.Bytes())
 			return nil
@@ -653,6 +661,7 @@ func newGainCmd(g *globals) *cobra.Command {
 	cmd.Flags().StringVar(&since, "since", "", "only count calls newer than this (e.g. 7d, 24h)")
 	cmd.Flags().StringVar(&by, "by", "", "group by: cmd or repo")
 	cmd.Flags().BoolVar(&history, "history", false, "show recent calls")
+	cmd.Flags().BoolVar(&fun, "fun", false, "extra, less serious statistics")
 	return cmd
 }
 

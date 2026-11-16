@@ -308,3 +308,22 @@ func Wrap(s, indent string, width int) []string {
 	}
 	return out
 }
+
+// Plain returns s with SGR escape sequences removed. It exists so a caller can
+// fold text without risking a split escape sequence.
+func Plain(s string) string {
+	if !strings.Contains(s, "\x1b[") {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := sgrEnd(s, i)
+			i = j
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}

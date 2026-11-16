@@ -166,3 +166,38 @@ func TestSummarizeByRepo(t *testing.T) {
 		t.Fatalf("blank group present: %+v", a.Groups)
 	}
 }
+
+func TestSummarizeVerdicts(t *testing.T) {
+	recs := []Record{
+		{Cmd: "run", Verdict: "FLAKY"},
+		{Cmd: "job", Verdict: "FLAKY"},
+		{Cmd: "run", Verdict: "BROKEN"},
+		{Cmd: "log"},
+	}
+	a := Summarize(recs, "", time.Time{})
+	if a.Verdicts["FLAKY"] != 2 || a.Verdicts["BROKEN"] != 1 {
+		t.Fatalf("verdicts = %+v", a.Verdicts)
+	}
+	if len(a.Verdicts) != 2 {
+		t.Fatalf("a record without a verdict must not be counted: %+v", a.Verdicts)
+	}
+}
+
+func TestSummarizeSinceFiltersTopSaves(t *testing.T) {
+	now := time.Now().UTC()
+	recs := []Record{
+		{TS: now.Add(-48 * time.Hour), Cmd: "run", ReadBytes: 9_000_000, EmittedBytes: 1},
+		{TS: now.Add(-time.Hour), Cmd: "run", ReadBytes: 5_000, EmittedBytes: 1},
+	}
+	a := Summarize(recs, "", now.Add(-24*time.Hour))
+	if a.Totals.Calls != 1 {
+		t.Fatalf("calls = %d", a.Totals.Calls)
+	}
+	// Top saves must describe the same window as the totals, not the whole file.
+	if len(a.Top) != 1 || a.Top[0].ReadBytes != 5_000 {
+		t.Fatalf("top = %+v", a.Top)
+	}
+	if got := len(InWindow(recs, time.Time{})); got != 2 {
+		t.Fatalf("a zero cutoff must keep every record, got %d", got)
+	}
+}

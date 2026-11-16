@@ -346,10 +346,11 @@ func TestGainEmptyAndPopulated(t *testing.T) {
 		Since: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
 		Totals: stats.Totals{
 			Calls: 2, ReadBytes: 1000, EmittedBytes: 100,
-			NetworkBytes: 1000, InventoryBytes: 5000, CacheHits: 1, WallMS: 1000,
+			NetworkBytes: 300, InventoryBytes: 5000, CacheHits: 1, WallMS: 1000,
 		},
-		Groups: map[string]stats.Totals{"run": {Calls: 2, ReadBytes: 1000}},
-		Top:    []stats.Record{{Cmd: "run", Target: "job/1", ReadBytes: 1000, EmittedBytes: 100}},
+		Groups:   map[string]stats.Totals{"run": {Calls: 2, ReadBytes: 1000}},
+		Top:      []stats.Record{{Cmd: "run", Target: "job/1", ReadBytes: 1000, EmittedBytes: 100}},
+		Verdicts: map[string]int{"FLAKY": 2},
 	}
 	buf.Reset()
 	Gain(&buf, a, 4, 10*time.Minute, testStyle())
@@ -357,7 +358,8 @@ func TestGainEmptyAndPopulated(t *testing.T) {
 	for _, want := range []string{
 		"saved", "2 calls", "since 2026-10-14", "10.0% of input",
 		"~tokens saved", "run", "top saves", "job/1",
-		"manual time saved",
+		"(900 B ÷ 4 bytes/token)",
+		"manual time saved", "from cache (70%)", "2 FLAKY", "█",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
@@ -415,6 +417,12 @@ func historyRecords() []stats.Record {
 		{TS: time.Date(2026, 11, 15, 4, 37, 0, 0, time.UTC), Cmd: "run",
 			Target:    "pull-ci-rh-ecosystem-edge-recert-main-e2e/2120987667142283264",
 			ReadBytes: 11_200_000, EmittedBytes: 4_900},
+		{TS: time.Date(2026, 11, 12, 22, 10, 0, 0, time.UTC), Cmd: "failures",
+			Target:    "pull-ci-rh-ecosystem-edge-recert-main-e2e/2120987667142283264",
+			ReadBytes: 5_500_000, EmittedBytes: 1_100},
+		{TS: time.Date(2026, 11, 13, 9, 5, 0, 0, time.UTC), Cmd: "job",
+			Target:    "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial",
+			ReadBytes: 105_000, EmittedBytes: 640, Verdict: "FLAKY", PassRate: 0.64},
 	}
 }
 
@@ -422,6 +430,48 @@ func TestHistoryGolden(t *testing.T) {
 	var buf bytes.Buffer
 	History(&buf, testStyle(), historyRecords())
 	golden(t, "history.txt", buf.String())
+}
+
+func TestFunGolden(t *testing.T) {
+	recs := historyRecords()
+	recs = append(recs, stats.Record{
+		TS: time.Date(2026, 11, 15, 4, 39, 0, 0, time.UTC), Cmd: "job",
+		Target:    "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename",
+		ReadBytes: 260_000, EmittedBytes: 700, Verdict: "BROKEN", PassRate: 0.13,
+	})
+	var buf bytes.Buffer
+	Fun(&buf, testStyle(), recs)
+	golden(t, "fun.txt", buf.String())
+}
+
+func TestCallSummary(t *testing.T) {
+	st := testStyle()
+	if got := callSummary(st, nil); got != "" {
+		t.Errorf("empty summary = %q", got)
+	}
+	// Four calls across three days, with a zero-call day in the middle: the
+	// span counts days, not rows.
+	recs := []stats.Record{
+		{TS: time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)},
+		{TS: time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)},
+		{TS: time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)},
+		{TS: time.Date(2026, 11, 15, 11, 0, 0, 0, time.UTC)},
+	}
+	if got, want := callSummary(st, recs), "4 over 3 days · busiest 15 Nov (3)"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+	// One day is singular, not "1 days".
+	if got, want := callSummary(st, recs[1:]), "3 over 1 day · busiest 15 Nov (3)"; got != want {
+		t.Errorf("single day = %q, want %q", got, want)
+	}
+	// A month boundary is stated, not implied by a bare day number.
+	across := []stats.Record{
+		{TS: time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)},
+		{TS: time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)},
+	}
+	if got, want := callSummary(st, across), "2 over 2 days · busiest 31 Oct (1)"; got != want {
+		t.Errorf("month boundary = %q, want %q", got, want)
+	}
 }
 
 func TestSearchGolden(t *testing.T) {
@@ -491,10 +541,112 @@ func TestRenderWidths(t *testing.T) {
 	PR(&buf, narrow, "org", "repo", "1", "a long enough title to fold", []PRCard{
 		{Check: "ci/prow/x", Job: "pull-ci-org-repo-main-" + strings.Repeat("y", 80), Prow: true},
 	})
+	Gain(&buf, stats.Aggregate{
+		Since:    time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
+		Totals:   stats.Totals{Calls: 2, ReadBytes: 1000, EmittedBytes: 100, NetworkBytes: 300, InventoryBytes: 5000, Missing: 3},
+		Groups:   map[string]stats.Totals{"rh-ecosystem-edge/recert-with-a-long-name": {Calls: 2, ReadBytes: 1000}},
+		Top:      []stats.Record{{Cmd: "run", Target: "job/" + strings.Repeat("z", 90), ReadBytes: 1000, EmittedBytes: 100}},
+		Verdicts: map[string]int{"FLAKY": 1, "BROKEN": 1},
+	}, 4, 10*time.Minute, narrow)
+	Fun(&buf, narrow, historyRecords())
 
 	for _, line := range strings.Split(buf.String(), "\n") {
 		if n := term.Visible(line); n > 60 {
 			t.Errorf("line is %d columns wide: %q", n, line)
 		}
+	}
+}
+
+func TestNextMilestone(t *testing.T) {
+	cases := []struct {
+		saved int64
+		want  int64
+	}{
+		{0, 0},              // nothing saved yet
+		{-5, 0},             // a negative total is not worth celebrating
+		{1, 1 << 20},        // first milestone is 1 MB
+		{1 << 20, 10 << 20}, // exactly at one rolls to the next
+		{10 << 20, 100 << 20},
+		{100 << 20, 1 << 30},
+		{1 << 30, 10 << 30},
+		{100 << 30, 0}, // past the last milestone: nothing left to count to
+	}
+	for _, c := range cases {
+		if got := nextMilestone(c.saved); got != c.want {
+			t.Errorf("nextMilestone(%d) = %d, want %d", c.saved, got, c.want)
+		}
+	}
+}
+
+func TestVerdictCounts(t *testing.T) {
+	st := testStyle()
+	if got := verdictCounts(st, map[string]int{"FLAKY": 0}); got != "" {
+		t.Errorf("zero counts rendered %q", got)
+	}
+	if got := verdictCounts(st, nil); got != "" {
+		t.Errorf("nil counts rendered %q", got)
+	}
+	// Worst first, and a zero count is omitted rather than printed as 0 FLAKY.
+	got := verdictCounts(st, map[string]int{"HEALTHY": 1, "BROKEN": 2, "FLAKY": 0})
+	if got != "2 BROKEN · 1 HEALTHY" {
+		t.Errorf("order/count = %q", got)
+	}
+	// A verdict this build does not know is shown, not silently dropped.
+	got = verdictCounts(st, map[string]int{"FLAKY": 1, "WEIRD": 2})
+	if got != "1 FLAKY · 2 WEIRD" {
+		t.Errorf("unknown verdict = %q", got)
+	}
+}
+
+func TestGroupBarWidth(t *testing.T) {
+	if got := groupBarWidth(term.Config(new(bytes.Buffer), "never", 60)); got != 13 {
+		t.Errorf("width 60 bar = %d", got)
+	}
+	// Wide terminals cap the bar rather than letting it grow without bound.
+	if got := groupBarWidth(testStyle()); got != 24 {
+		t.Errorf("width 100 bar = %d, want the 24 cap", got)
+	}
+	// Below the threshold there is no room for a bar at all.
+	if got := groupBarWidth(term.Config(new(bytes.Buffer), "never", 30)); got != 0 {
+		t.Errorf("width 30 bar = %d, want 0", got)
+	}
+}
+
+func TestGrowWraps(t *testing.T) {
+	// A value that does not fit folds under its own label and stays inside the
+	// terminal; the long word is hard-split rather than overflowing.
+	var buf bytes.Buffer
+	narrow := term.Config(new(bytes.Buffer), "never", 40)
+	grow(&buf, narrow, "read", "1000 B → 100 B emitted (10.0% of input), plus a verylongunbrokenwordthatexceedsthewidth")
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if n := term.Visible(line); n > 40 {
+			t.Errorf("line is %d columns wide: %q", n, line)
+		}
+	}
+	if got := buf.String(); !strings.Contains(got, "read") {
+		t.Errorf("label lost: %q", got)
+	}
+}
+
+func TestFunSkipsWhatItCannotSay(t *testing.T) {
+	st := testStyle()
+
+	var empty bytes.Buffer
+	Fun(&empty, st, nil)
+	if empty.Len() != 0 {
+		t.Errorf("no records should print nothing: %q", empty.String())
+	}
+
+	// Records with no verdict and no pass rate: no roulette line.
+	var plain bytes.Buffer
+	Fun(&plain, st, []stats.Record{
+		{TS: time.Date(2026, 11, 15, 4, 0, 0, 0, time.UTC), Cmd: "log", ReadBytes: 10},
+	})
+	out := plain.String()
+	if strings.Contains(out, "roulette") {
+		t.Errorf("roulette without judged records: %q", out)
+	}
+	if !strings.Contains(out, "worst") || !strings.Contains(out, "hours") {
+		t.Errorf("missing fun lines: %q", out)
 	}
 }

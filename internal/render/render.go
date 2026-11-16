@@ -95,9 +95,33 @@ func fit(st term.Style, s string) string {
 	return term.Trunc(s, st.Width()-len(rowIndent))
 }
 
-// grow writes a labelled row with the wider gutter the savings card needs.
+// savingsGutter is the label column the savings card uses; "next milestone" is
+// the widest label it prints.
+const savingsGutter = 21
+
+// grow writes a labelled row with the wider gutter the savings card needs. On a
+// narrow terminal the value folds under itself; styling is dropped first,
+// because a wrapped escape sequence would corrupt the line.
 func grow(w io.Writer, st term.Style, name, value string) {
-	fmt.Fprintf(w, "  %s %s\n", st.Dim(term.PadRight(name, 21)), value)
+	labelW := term.Visible(name)
+	if labelW < savingsGutter {
+		labelW = savingsGutter
+	}
+	// A long group label must not push the value off the line.
+	if limit := st.Width() / 2; labelW > limit {
+		name = term.TruncMiddle(name, limit)
+		labelW = term.Visible(name)
+	}
+	indent := strings.Repeat(" ", 2+labelW+1)
+	if term.Visible(value)+len(indent) <= st.Width() && !strings.Contains(value, "\n") {
+		fmt.Fprintf(w, "  %s %s\n", st.Dim(term.PadRight(name, labelW)), value)
+		return
+	}
+	lines := term.Wrap(term.Plain(value), indent, st.Width())
+	fmt.Fprintf(w, "  %s %s\n", st.Dim(term.PadRight(name, labelW)), strings.TrimPrefix(lines[0], indent))
+	for _, l := range lines[1:] {
+		fmt.Fprintln(w, l)
+	}
 }
 
 // plural returns one when n is exactly one, otherwise many.
@@ -613,12 +637,32 @@ func Gain(w io.Writer, a stats.Aggregate, bytesPerToken int, baseline time.Durat
 	grow(w, st, "calls", fmt.Sprintf("%d   ·  cache hits %d", a.Totals.Calls, a.Totals.CacheHits))
 	grow(w, st, "read", fmt.Sprintf("%s → %s emitted (%.1f%% of input)",
 		FormatBytes(a.Totals.ReadBytes), FormatBytes(a.Totals.EmittedBytes), pct))
+	if a.Totals.ReadBytes > 0 {
+		// read includes cache hits; network is what actually came over the wire,
+		// so this is the line that shows what the cache is buying.
+		cached := a.Totals.ReadBytes - a.Totals.NetworkBytes
+		if cached < 0 {
+			cached = 0
+		}
+		grow(w, st, "network", fmt.Sprintf("%s downloaded · %s from cache (%.0f%%)",
+			FormatBytes(a.Totals.NetworkBytes), FormatBytes(cached),
+			float64(cached)/float64(a.Totals.ReadBytes)*100))
+	}
 	if a.Totals.InventoryBytes > 0 {
 		grow(w, st, "full trees", fmt.Sprintf("%s   %s", FormatBytes(a.Totals.InventoryBytes),
 			st.Dim("(upper bound, not all of it would be read)")))
 	}
-	tokens := savedBytes / int64(max(bytesPerToken, 1))
-	grow(w, st, "~tokens saved", st.Yellow(FormatCount(tokens)))
+	// Show the division, so the modelled figure carries its own arithmetic and
+	// --bytes-per-token is discoverable from the output.
+	divisor := int64(max(bytesPerToken, 1))
+	tokens := savedBytes / divisor
+	grow(w, st, "~tokens saved", fmt.Sprintf("%s   %s",
+		st.Yellow(FormatCount(tokens)),
+		st.Dim(fmt.Sprintf("(%s ÷ %d bytes/token)", FormatBytes(savedBytes), divisor))))
+	if a.Totals.Missing > 0 {
+		grow(w, st, "missing", fmt.Sprintf("%s   %s", FormatCount(a.Totals.Missing),
+			st.Dim("lookups returned 404")))
+	}
 
 	if dl := downloadSeconds(a); dl > 0 {
 		grow(w, st, "~download time saved", fmt.Sprintf("%s   %s", FormatDuration(dl), st.Dim("(measured throughput)")))
@@ -632,8 +676,18 @@ func Gain(w io.Writer, a stats.Aggregate, bytesPerToken int, baseline time.Durat
 				st.Dim("(vs "+baseline.String()+" baseline per call; modelled)")))
 		}
 	}
+	if len(a.Verdicts) > 0 {
+		grow(w, st, "verdicts", verdictCounts(st, a.Verdicts))
+	}
+	// Only worth showing once there is visible progress; "0% there" is noise.
+	if next := nextMilestone(savedBytes); next > 0 && savedBytes >= next/100 {
+		grow(w, st, "next milestone", fmt.Sprintf("%s · %.0f%% there",
+			FormatBytes(next), float64(savedBytes)/float64(next)*100))
+	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, st.Dim("(measured numbers come from recorded calls; ~ marks modelled estimates)"))
+	for _, l := range term.Wrap("(measured numbers come from recorded calls; ~ marks modelled estimates)", "", st.Width()) {
+		fmt.Fprintln(w, st.Dim(l))
+	}
 
 	if len(a.Groups) > 0 {
 		keys := make([]string, 0, len(a.Groups))
@@ -642,23 +696,37 @@ func Gain(w io.Writer, a stats.Aggregate, bytesPerToken int, baseline time.Durat
 		}
 		sort.Slice(keys, func(i, j int) bool { return a.Groups[keys[i]].ReadBytes > a.Groups[keys[j]].ReadBytes })
 		fmt.Fprintln(w)
+		barW := groupBarWidth(st)
+		top := a.Groups[keys[0]].ReadBytes
 		for _, k := range keys {
 			t := a.Groups[k]
 			label := k
 			if label == "" {
 				label = "(unknown)"
 			}
-			grow(w, st, label, fmt.Sprintf("%d calls · %s read", t.Calls, FormatBytes(t.ReadBytes)))
+			filled := 0
+			if top > 0 && barW > 0 {
+				filled = int(float64(t.ReadBytes) / float64(top) * float64(barW))
+				if filled == 0 {
+					filled = 1
+				}
+			}
+			bar := st.Cyan(strings.Repeat("█", filled)) + st.Dim(strings.Repeat("░", barW-filled))
+			grow(w, st, label, fmt.Sprintf("%s %d calls · %s read", bar, t.Calls, FormatBytes(t.ReadBytes)))
 		}
 	}
 	if len(a.Top) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, st.Dim("top saves"))
 		for _, r := range a.Top {
+			targetW := st.Width() - 19
+			if targetW < 8 {
+				targetW = 8
+			}
 			fmt.Fprintf(w, "  %s  %s %s\n",
 				st.Dim(term.PadLeft(FormatBytes(r.ReadBytes-r.EmittedBytes), 9)),
 				term.PadRight(r.Cmd, 5),
-				term.TruncMiddle(r.Target, st.Width()-18))
+				term.TruncMiddle(r.Target, targetW))
 		}
 	}
 }
@@ -738,11 +806,11 @@ func History(w io.Writer, st term.Style, recs []stats.Record) {
 	// On a narrow terminal there is no room for a target column at all; drop it
 	// rather than squeezing every line past the width.
 	showTarget := targetW >= minName
-	if showTarget {
-		fmt.Fprintf(w, "%s %s\n\n", st.Bold("recent calls"), st.Dim(fmt.Sprintf("(%d, newest last)", len(recs))))
-	} else {
-		fmt.Fprintf(w, "%s %s\n\n", st.Bold("recent calls"), st.Dim(fmt.Sprintf("(%d, newest last)", len(recs))))
+	fmt.Fprintf(w, "%s %s\n", st.Bold("recent calls"), st.Dim(fmt.Sprintf("(%d, newest last)", len(recs))))
+	if summary := callSummary(st, recs); summary != "" {
+		fmt.Fprintf(w, "  %s %s\n", st.Dim("calls/day"), term.Trunc(summary, st.Width()-13))
 	}
+	fmt.Fprintln(w)
 	header := fmt.Sprintf("  %s %s %s",
 		st.Dim(term.PadRight("WHEN", whenW)),
 		st.Dim(term.PadRight("CMD", cmdW)),
@@ -955,4 +1023,161 @@ func PRCardLine(st term.Style, c PRCard, jobW int) string {
 		line += st.Dim(" pass (" + extra + ")")
 	}
 	return line + "\n"
+}
+
+// verdictOrder is the order verdicts are listed in: worst first.
+var verdictOrder = []health.Verdict{
+	health.VerdictBroken, health.VerdictFlaky, health.VerdictDegraded,
+	health.VerdictHealthy, health.VerdictUnknown,
+}
+
+// verdictCounts renders "3 BROKEN · 9 FLAKY · 1 HEALTHY", coloured per verdict.
+// A verdict this build does not know is still shown, rather than being counted
+// and then silently dropped.
+func verdictCounts(st term.Style, counts map[string]int) string {
+	var parts []string
+	known := make(map[string]bool, len(verdictOrder))
+	for _, v := range verdictOrder {
+		known[string(v)] = true
+		if n := counts[string(v)]; n > 0 {
+			parts = append(parts, verdictStyle(st, v, fmt.Sprintf("%d %s", n, v)))
+		}
+	}
+	var unknown []string
+	for k, n := range counts {
+		if !known[k] && n > 0 {
+			unknown = append(unknown, fmt.Sprintf("%d %s", n, k))
+		}
+	}
+	sort.Strings(unknown)
+	parts = append(parts, unknown...)
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, st.Dim(" · "))
+}
+
+// milestones are the round numbers the "next" row counts up to.
+var milestones = []int64{
+	1 << 20, 10 << 20, 100 << 20,
+	1 << 30, 10 << 30, 100 << 30,
+}
+
+// nextMilestone returns the next round total above saved, or 0 when there is
+// nothing to celebrate yet.
+func nextMilestone(saved int64) int64 {
+	if saved <= 0 {
+		return 0
+	}
+	for _, m := range milestones {
+		if saved < m {
+			return m
+		}
+	}
+	return 0
+}
+
+// groupBarValueW is roughly the width of " 12 calls · 47.2 MB read", which the
+// bar shares its line with.
+const groupBarValueW = 26
+
+// groupBarWidth is how many cells a group bar may use, leaving room for the
+// label and the counts on the same line.
+func groupBarWidth(st term.Style) int {
+	w := st.Width() - savingsGutter - groupBarValueW
+	if w < 4 {
+		return 0
+	}
+	if w > 24 {
+		return 24
+	}
+	return w
+}
+
+// callSummary describes the span the listed calls cover: how many calls, over
+// how many days, and the busiest day. A sparkline was tried here first and read
+// as a row of underscores on a short range, so it states the numbers instead.
+func callSummary(st term.Style, recs []stats.Record) string {
+	if len(recs) == 0 {
+		return ""
+	}
+	day := func(t time.Time) time.Time {
+		y, m, d := t.UTC().Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	}
+	counts := map[time.Time]int{}
+	first, last := day(recs[0].TS), day(recs[0].TS)
+	for _, r := range recs {
+		d := day(r.TS)
+		counts[d]++
+		if d.Before(first) {
+			first = d
+		}
+		if d.After(last) {
+			last = d
+		}
+	}
+	busiest, most := first, 0
+	for d := first; !d.After(last); d = d.AddDate(0, 0, 1) {
+		if counts[d] > most {
+			busiest, most = d, counts[d]
+		}
+	}
+	span := int(last.Sub(first).Hours()/24) + 1
+	return fmt.Sprintf("%d over %s · busiest %s (%d)",
+		len(recs), plural(span, "1 day", fmt.Sprintf("%d days", span)),
+		busiest.Format("2 Jan"), most)
+}
+
+// Fun writes the optional, less serious statistics behind `gain --fun`. The
+// lines stay short enough to survive a narrow terminal, because the numbers are
+// the point and a folded joke is not funny.
+func Fun(w io.Writer, st term.Style, recs []stats.Record) {
+	if len(recs) == 0 {
+		return
+	}
+	var (
+		worst   stats.Record
+		judged  int
+		passSum float64
+		hours   = map[int]int{}
+		busiest = -1
+		busyN   int
+	)
+	for _, r := range recs {
+		if r.ReadBytes > worst.ReadBytes {
+			worst = r
+		}
+		if r.PassRate > 0 && (r.Verdict == "FLAKY" || r.Verdict == "BROKEN") {
+			judged++
+			passSum += r.PassRate
+		}
+		hours[r.TS.UTC().Hour()]++
+	}
+	// Pick the busiest hour after counting, so a tie resolves to the earliest
+	// hour rather than to whichever record happened to come last.
+	for h, n := range hours {
+		if n > busyN || (n == busyN && (busiest < 0 || h < busiest)) {
+			busiest, busyN = h, n
+		}
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, st.Dim("for fun"))
+	if worst.ReadBytes > 0 {
+		prefix := FormatBytes(worst.ReadBytes) + " · "
+		room := st.Width() - 21 - 2 - 1 - len(prefix)
+		if room < 8 {
+			room = 8
+		}
+		grow(w, st, "worst", prefix+st.Dim(term.TruncMiddle(worst.Target, room)))
+	}
+	if judged > 0 {
+		grow(w, st, "retest roulette", fmt.Sprintf("%d flaky · blind retest wins %.0f%%",
+			judged, passSum/float64(judged)*100))
+	}
+	if busiest >= 0 {
+		grow(w, st, "hours", fmt.Sprintf("%02d:00 UTC · %d of %d calls",
+			busiest, busyN, len(recs)))
+	}
 }

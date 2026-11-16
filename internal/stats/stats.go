@@ -27,6 +27,7 @@ type Record struct {
 	Missing        int64     `json:"missing"`
 	WallMS         int64     `json:"wall_ms"`
 	Verdict        string    `json:"verdict,omitempty"`
+	PassRate       float64   `json:"pass_rate,omitempty"`
 }
 
 // Dir returns the per-user cache directory.
@@ -179,15 +180,31 @@ type Aggregate struct {
 	Totals Totals            `json:"totals"`
 	Groups map[string]Totals `json:"groups,omitempty"`
 	Top    []Record          `json:"top_saves,omitempty"`
+	// Verdicts counts the job verdicts seen, so `gain` can show where the
+	// attention went rather than only how many bytes it cost.
+	Verdicts map[string]int `json:"verdicts,omitempty"`
+}
+
+// InWindow returns the records at or after since, or recs unchanged when since
+// is zero. Summarize and the optional fun block both need the same set.
+func InWindow(recs []Record, since time.Time) []Record {
+	if since.IsZero() {
+		return recs
+	}
+	out := make([]Record, 0, len(recs))
+	for _, r := range recs {
+		if !r.TS.Before(since) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Summarize sums records newer than since. by may be "cmd", "repo" or empty.
 func Summarize(recs []Record, by string, since time.Time) Aggregate {
-	a := Aggregate{Schema: api.SchemaV1, Groups: map[string]Totals{}}
-	for _, r := range recs {
-		if !since.IsZero() && r.TS.Before(since) {
-			continue
-		}
+	view := InWindow(recs, since)
+	a := Aggregate{Schema: api.SchemaV1, Groups: map[string]Totals{}, Verdicts: map[string]int{}}
+	for _, r := range view {
 		if a.Since.IsZero() || r.TS.Before(a.Since) {
 			a.Since = r.TS
 		}
@@ -195,6 +212,9 @@ func Summarize(recs []Record, by string, since time.Time) Aggregate {
 			a.Until = r.TS
 		}
 		a.Totals.Add(r)
+		if r.Verdict != "" {
+			a.Verdicts[r.Verdict]++
+		}
 		if by != "" {
 			key := r.Cmd
 			if by == "repo" {
@@ -210,7 +230,8 @@ func Summarize(recs []Record, by string, since time.Time) Aggregate {
 			a.Groups[key] = t
 		}
 	}
-	sorted := append([]Record(nil), recs...)
+	// Top saves honours --since too; it used to sort the whole file.
+	sorted := append([]Record(nil), view...)
 	sort.Slice(sorted, func(i, j int) bool {
 		return saved(sorted[i]) > saved(sorted[j])
 	})

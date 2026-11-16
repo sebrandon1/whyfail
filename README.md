@@ -76,8 +76,8 @@ Command-specific flags:
 - `artifact` — `--list` (list a prefix instead of reading an object), `--limit <n>`
   (maximum objects to list, default 200; `0` = all)
 - `search` — `--max-age <dur>` (search window, default `48h`)
-- `gain` — `--history` (recent calls), `--since <dur>`, `--by cmd|repo`
-  (aliases: `stats`, `saved`)
+- `gain` — `--history` (recent calls), `--fun` (the less serious statistics),
+  `--since <dur>`, `--by cmd|repo` (aliases: `stats`, `saved`)
 
 ### Cache
 
@@ -147,7 +147,7 @@ a name is never reused for something else.
 | `log` | `schema`, `artifact`, `lines`, `text` |
 | `artifact` | `schema`, `object`, `size`, `content_type`, `updated`, `excerpt`, `truncated` |
 | `search` | `schema`, `query`, `matches`, `jobs`, `known_bug` |
-| `gain` | `schema`, `since`, `until`, `totals`, `groups`, `top_saves` |
+| `gain` | `schema`, `since`, `until`, `totals`, `groups`, `top_saves`, `verdicts` |
 | `pr` | `schema`, `pr`, `title`, `sha`, `failing[]` — each card is `check`, `job`, `prow`, `health` |
 
 A `pr` card's `health` is `null` when there is no Prow job behind the check
@@ -225,8 +225,11 @@ whyfail gain --history
 whyfail gain --by repo --since 7d
 ```
 
-It reports bytes read versus emitted, estimated tokens saved, and separates
-measured numbers from modelled ones. Disable with `--no-stats` or
+It reports bytes read versus emitted, what came from the cache versus the
+network, which job verdicts you spent your calls on, how far you are from the
+next round milestone, and — under `--fun` — the most expensive single
+investigation, what a blind retest would have won, and the hour you triage
+most. Measured numbers are separated from modelled ones (prefixed `~`). Disable with `--no-stats` or
 `WHYFAIL_NO_STATS=1`.
 
 ## Limitations

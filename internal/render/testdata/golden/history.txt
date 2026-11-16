@@ -1,5 +1,8 @@
-recent calls (2, newest last)
+recent calls (4, newest last)
+  calls/day 4 over 4 days · busiest 15 Nov (2)
 
   WHEN             CMD                    READ → EMITTED TARGET
   2026-11-15 04:38 log                   10.1 KB → 210 B pr-logs/pull/r…gather/build-log.txt
   2026-11-15 04:37 run                  10.7 MB → 4.8 KB pull-ci-rh-eco…2120987667142283264
+  2026-11-12 22:10 failures              5.2 MB → 1.1 KB pull-ci-rh-eco…2120987667142283264
+  2026-11-13 09:05 job                  102.5 KB → 640 B pull-ci-rh-eco…vn-single-node-recert-serial

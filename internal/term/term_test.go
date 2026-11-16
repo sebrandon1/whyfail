@@ -175,3 +175,14 @@ func TestConfigEnvironment(t *testing.T) {
 		t.Error("TERM=dumb should disable colour")
 	}
 }
+
+func TestPlain(t *testing.T) {
+	st := Config(new(bytes.Buffer), "always", 100)
+	coloured := st.Red("bad") + " and " + st.Bold("bold")
+	if got := Plain(coloured); got != "bad and bold" {
+		t.Errorf("Plain = %q", got)
+	}
+	if got := Plain("no escapes"); got != "no escapes" {
+		t.Errorf("Plain changed uncoloured text: %q", got)
+	}
+}
