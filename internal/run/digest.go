@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -242,8 +243,13 @@ func Build(ctx context.Context, c *gcs.Client, ref prow.Ref, opts Options) (*Dig
 
 	d.Job = &JobInfo{Name: run.JobName, Type: run.Type}
 	if opts.History {
-		if sum, err := health.Collect(ctx, c, ref.Bucket, run.JobName, 0); err == nil {
+		switch sum, err := health.Collect(ctx, c, ref.Bucket, run.JobName, 0); {
+		case err == nil:
 			d.Job.Health = sum
+		case errors.Is(err, health.ErrJobNotFound):
+			// The run exists but its job is not in the index: report "no
+			// history" rather than dropping the job block from the card.
+			d.Job.Health = &health.Summary{Job: run.JobName, Verdict: health.VerdictUnknown}
 		}
 	}
 

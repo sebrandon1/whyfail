@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -213,6 +214,9 @@ func newJobCmd(g *globals) *cobra.Command {
 			start := time.Now()
 			sum, err := health.Collect(ctx, c, g.bucket, args[0], g.window)
 			if err != nil {
+				if errors.Is(err, health.ErrJobNotFound) {
+					return fmt.Errorf("job %q not found in %s (checked pr-logs/directory/ and logs/)", args[0], g.bucket)
+				}
 				return err
 			}
 			var buf bytes.Buffer
@@ -640,12 +644,7 @@ func newPRCmd(g *globals) *cobra.Command {
 				return err
 			}
 
-			type card struct {
-				Check  string          `json:"check"`
-				Job    string          `json:"job"`
-				Health *health.Summary `json:"health"`
-			}
-			var cards []card
+			var cards []prCard
 			seen := map[string]bool{}
 			for _, s := range statuses {
 				// Statuses are returned newest first; keep the latest per context.
@@ -661,8 +660,10 @@ func newPRCmd(g *globals) *cobra.Command {
 					continue
 				}
 				job := "pull-ci-" + org + "-" + repo + "-" + base + "-" + test
+				// A missing job history must not hide the failing check; the
+				// renderer says the lookup found nothing.
 				sum, _ := health.Collect(ctx, c, g.bucket, job, g.window)
-				cards = append(cards, card{Check: s.Context, Job: job, Health: sum})
+				cards = append(cards, prCard{Check: s.Context, Job: job, Health: sum})
 			}
 
 			var buf bytes.Buffer
@@ -683,13 +684,8 @@ func newPRCmd(g *globals) *cobra.Command {
 				}
 				bad := 0
 				for _, cd := range cards {
-					icon, label := render.VerdictLabel(cd.Health.Verdict)
-					fmt.Fprintf(&buf, "  %s %s %s %s pass (%d runs)\n",
-						term.PadRight(term.TruncMiddle(cd.Job, jobW), jobW),
-						render.VerdictText(st, cd.Health.Verdict, icon),
-						render.VerdictText(st, cd.Health.Verdict, term.PadRight(label, 9)),
-						st.Dim(health.FormatRate(cd.Health.PassRate)), cd.Health.Runs)
-					if cd.Health.Verdict.IsBad() {
+					buf.WriteString(prCardLine(st, cd, jobW))
+					if cd.Health != nil && cd.Health.Verdict.IsBad() {
 						bad++
 					}
 				}
@@ -701,6 +697,31 @@ func newPRCmd(g *globals) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// prCard is one failing check on a PR head commit. Health is nil when the job
+// could not be looked up at all — usually a base-branch rename, which makes the
+// synthesised job name wrong.
+type prCard struct {
+	Check  string          `json:"check"`
+	Job    string          `json:"job"`
+	Health *health.Summary `json:"health"`
+}
+
+// prCardLine renders one check. A nil Health is reported as an unknown job
+// rather than dereferenced or silently treated as healthy.
+func prCardLine(st term.Style, cd prCard, jobW int) string {
+	name := term.PadRight(term.TruncMiddle(cd.Job, jobW), jobW)
+	if cd.Health == nil {
+		return fmt.Sprintf("  %s %s %s\n", name,
+			st.Dim(term.PadRight("? UNKNOWN", 11)),
+			st.Dim("no history in this bucket"))
+	}
+	icon, label := render.VerdictLabel(cd.Health.Verdict)
+	return fmt.Sprintf("  %s %s %s %s pass (%d runs)\n", name,
+		render.VerdictText(st, cd.Health.Verdict, icon),
+		render.VerdictText(st, cd.Health.Verdict, term.PadRight(label, 9)),
+		st.Dim(health.FormatRate(cd.Health.PassRate)), cd.Health.Runs)
 }
 
 func ghGet(endpoint string) ([]byte, error) {

@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sebrandon1/whyfail/internal/health"
 	"github.com/sebrandon1/whyfail/internal/run"
+	"github.com/sebrandon1/whyfail/internal/term"
 )
 
 func TestTopSignature(t *testing.T) {
@@ -96,5 +100,31 @@ func TestStringField(t *testing.T) {
 	}
 	if got := stringField(m, "user", "sha"); got != "" {
 		t.Errorf("missing field: %q", got)
+	}
+}
+
+func TestPRCardLine(t *testing.T) {
+	st := term.Config(new(bytes.Buffer), "never", 100)
+	const job = "pull-ci-org-repo-main-e2e-aws"
+
+	// A job that is not in the bucket must not panic or read as healthy.
+	unknown := prCardLine(st, prCard{Job: job}, 40)
+	if !strings.Contains(unknown, "UNKNOWN") || !strings.Contains(unknown, "no history in this bucket") {
+		t.Errorf("nil health: %q", unknown)
+	}
+
+	flaky := prCardLine(st, prCard{Job: job, Health: &health.Summary{
+		Verdict: health.VerdictFlaky, PassRate: 0.5, Runs: 10,
+	}}, 40)
+	for _, want := range []string{"FLAKY", "50.0%", "10 runs"} {
+		if !strings.Contains(flaky, want) {
+			t.Errorf("flaky line missing %q: %q", want, flaky)
+		}
+	}
+
+	// The job column is 40; the suffix must still fit the 100-column style.
+	long := prCardLine(st, prCard{Job: strings.Repeat("x", 200)}, 40)
+	if n := term.Visible(strings.SplitN(long, "\n", 2)[0]); n > st.Width() {
+		t.Errorf("line is %d columns wide: %q", n, long)
 	}
 }
