@@ -212,8 +212,60 @@ func TestNextAction(t *testing.T) {
 		Run:   &RunInfo{State: "failure"},
 		Tests: &Tests{Failed: []TestFailure{{Name: "t", Blocking: true}}},
 	}
-	if got := nextAction(blocking); !strings.Contains(got, "blocking test failed") {
+	if got := nextAction(blocking); !strings.Contains(got, `blocking test "t" failed`) {
 		t.Errorf("blocking: %q", got)
+	}
+
+	// A concrete blocking failure outranks the flaky verdict, but the verdict
+	// must stay visible.
+	flakyBlocking := &Digest{
+		Job:   &JobInfo{Health: &health.Summary{Verdict: health.VerdictFlaky}},
+		Run:   &RunInfo{State: "failure"},
+		Tests: &Tests{Failed: []TestFailure{{Name: "t", Blocking: true}}},
+	}
+	if got := nextAction(flakyBlocking); !strings.Contains(got, `blocking test "t" failed`) ||
+		!strings.Contains(got, "known flaky") {
+		t.Errorf("flaky blocking: %q", got)
+	}
+
+	// A broken job keeps its own advice: retesting genuinely cannot help.
+	brokenBlocking := &Digest{
+		Job:   &JobInfo{Health: &health.Summary{Verdict: health.VerdictBroken}},
+		Run:   &RunInfo{State: "failure"},
+		Tests: &Tests{Failed: []TestFailure{{Name: "t", Blocking: true}}},
+	}
+	if got := nextAction(brokenBlocking); !strings.Contains(got, `blocking test "t" failed`) {
+		t.Errorf("broken blocking: %q", got)
+	}
+
+	multi := &Digest{
+		Run: &RunInfo{State: "failure"},
+		Tests: &Tests{Failed: []TestFailure{
+			{Name: "a", Blocking: true}, {Name: "b", Blocking: true},
+		}},
+	}
+	if got := nextAction(multi); !strings.Contains(got, `2 blocking tests failed`) ||
+		!strings.Contains(got, `"a"`) {
+		t.Errorf("multi blocking: %q", got)
+	}
+
+	unnamed := &Digest{
+		Run:   &RunInfo{State: "failure"},
+		Tests: &Tests{Failed: []TestFailure{{Blocking: true}}},
+	}
+	if got := nextAction(unnamed); !strings.Contains(got, "a blocking test failed") {
+		t.Errorf("unnamed blocking: %q", got)
+	}
+
+	// A job record without health must not change the advice.
+	noHealth := &Digest{
+		Job:   &JobInfo{},
+		Run:   &RunInfo{State: "failure"},
+		Tests: &Tests{Failed: []TestFailure{{Name: "t", Blocking: true}}},
+	}
+	if got := nextAction(noHealth); !strings.Contains(got, `blocking test "t" failed`) ||
+		strings.Contains(got, "flaky") {
+		t.Errorf("job without health: %q", got)
 	}
 
 	step := &Digest{
@@ -221,6 +273,25 @@ func TestNextAction(t *testing.T) {
 	}
 	if got := nextAction(step); !strings.Contains(got, `step "s2" failed`) || !strings.Contains(got, "whyfail log") {
 		t.Errorf("step: %q", got)
+	}
+
+	// Cleanup and input-resolution steps fail because something else did; name
+	// the earlier step instead.
+	gathered := &Digest{
+		Run: &RunInfo{State: "failure", Steps: StepsInfo{Failed: []StepRef{
+			{Name: "e2e-aws"}, {Name: "gather-must-gather"},
+			{Name: "gather-extra"}, {Name: "[input:installer]"},
+		}}},
+	}
+	if got := nextAction(gathered); !strings.Contains(got, `step "e2e-aws" failed`) {
+		t.Errorf("gather skipped: %q", got)
+	}
+
+	onlyGather := &Digest{
+		Run: &RunInfo{State: "failure", Steps: StepsInfo{Failed: []StepRef{{Name: "gather-must-gather"}}}},
+	}
+	if got := nextAction(onlyGather); !strings.Contains(got, `step "gather-must-gather" failed`) {
+		t.Errorf("all gather fallback: %q", got)
 	}
 
 	inform := &Digest{

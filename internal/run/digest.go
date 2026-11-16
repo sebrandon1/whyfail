@@ -982,6 +982,12 @@ func nextAction(d *Digest) string {
 	if state == "success" {
 		return "nothing to do; this run passed"
 	}
+	// A named, concrete failure outranks the job's overall verdict: a flaky job
+	// can still fail a blocking test deterministically, and telling the reader
+	// to retest would hide the thing they need to look at.
+	if advice := blockingAdvice(d.Tests); advice != "" {
+		return withFlakyCaveat(advice, d.Job)
+	}
 	if d.Job != nil && d.Job.Health != nil {
 		switch d.Job.Health.Verdict {
 		case health.VerdictBroken:
@@ -990,11 +996,7 @@ func nextAction(d *Digest) string {
 			return "job is known flaky; a retest is reasonable"
 		}
 	}
-	if len(d.Tests.blockingFailures()) > 0 {
-		return "a blocking test failed; inspect it before retesting"
-	}
-	if len(d.Run.Steps.Failed) > 0 {
-		step := d.Run.Steps.Failed[len(d.Run.Steps.Failed)-1]
+	if step, ok := rootCauseStep(d.Run.Steps.Failed); ok {
 		return fmt.Sprintf("step %q failed; run `whyfail log <run> %s`", step.Name, step.Name)
 	}
 	if d.Tests != nil && (len(d.Tests.Failed) > 0 || len(d.Tests.Monitors) > 0) {
@@ -1014,4 +1016,54 @@ func (t *Tests) blockingFailures() []TestFailure {
 		}
 	}
 	return out
+}
+
+// blockingAdvice names the blocking failure to look at, preferring the first
+// one and reporting how many others there are. It returns "" when no blocking
+// test failed.
+func blockingAdvice(t *Tests) string {
+	blocking := t.blockingFailures()
+	if len(blocking) == 0 {
+		return ""
+	}
+	name := blocking[0].Name
+	switch {
+	case name == "":
+		return "a blocking test failed; inspect it before retesting"
+	case len(blocking) > 1:
+		return fmt.Sprintf("%d blocking tests failed, starting with %q; inspect them before retesting",
+			len(blocking), name)
+	default:
+		return fmt.Sprintf("blocking test %q failed; inspect it before retesting", name)
+	}
+}
+
+// withFlakyCaveat keeps the job's flakiness visible without letting it displace
+// the concrete failure the reader has to act on.
+func withFlakyCaveat(advice string, job *JobInfo) string {
+	if job == nil || job.Health == nil || job.Health.Verdict != health.VerdictFlaky {
+		return advice
+	}
+	return "known flaky job, but " + advice
+}
+
+// rootCauseStep picks the failed step most likely to be the cause. Steps are
+// recorded in completion order and operator sub-steps are appended last, so the
+// search runs backwards; cleanup (gather-*) and input-resolution ([input:*])
+// steps are skipped because they fail as a consequence of the real failure.
+func rootCauseStep(failed []StepRef) (StepRef, bool) {
+	for i := len(failed) - 1; i >= 0; i-- {
+		if isConsequentialStep(failed[i].Name) {
+			continue
+		}
+		return failed[i], true
+	}
+	if len(failed) > 0 {
+		return failed[0], true
+	}
+	return StepRef{}, false
+}
+
+func isConsequentialStep(name string) bool {
+	return strings.HasPrefix(name, "gather-") || strings.HasPrefix(name, "[input:")
 }
