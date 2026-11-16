@@ -17,10 +17,11 @@ No authentication, no LLM, no automatic retests.
 ```sh
 make build          # ./bin/whyfail
 make install        # ~/go/bin/whyfail
+whyfail init        # Claude Code integration (plugin, hooks, skill)
 ```
 
 Requires Go 1.27+ (matching `go.mod`). The `pr` command additionally needs the `gh`
-CLI.
+CLI, and `init` needs the `claude` CLI unless you pass `--hooks-only`.
 
 ## Use
 
@@ -78,6 +79,10 @@ Command-specific flags:
 - `search` — `--max-age <dur>` (search window, default `48h`)
 - `gain` — `--history` (recent calls), `--fun` (the less serious statistics),
   `--since <dur>`, `--by cmd|repo` (aliases: `stats`, `saved`)
+- `init` — `--hooks-only` (write the hooks into `settings.json` instead of using the
+  plugin system), `--mcp` (also register the MCP server), `--project` (install for the
+  current repository instead of the user), `--from <owner/repo|url|path>` (marketplace
+  source, default `sebrandon1/whyfail`), `--dry-run`, `--uninstall`, `-y/--yes`
 
 ### Cache
 
@@ -149,6 +154,7 @@ a name is never reused for something else.
 | `search` | `schema`, `query`, `matches`, `jobs`, `known_bug` |
 | `gain` | `schema`, `since`, `until`, `totals`, `groups`, `top_saves`, `verdicts` |
 | `pr` | `schema`, `pr`, `title`, `sha`, `failing[]` — each card is `check`, `job`, `prow`, `health` |
+| `init` | `schema`, `scope`, `mode`, `dry_run`, `from`, `settings`, `steps[]`, `ok` |
 
 A `pr` card's `health` is `null` when there is no Prow job behind the check
 (`prow: false`) or when the job is not in the bucket; neither case is reported as
@@ -192,7 +198,7 @@ The digest uses structured sources first:
 Monitor failures are collapsed by cause, so “76 failures” becomes “8 causes” with
 the dominant one first.
 
-## Claude Code plugin
+## Claude Code integration
 
 `plugin/` is a Claude Code plugin that installs a `PreToolUse` hook and a skill:
 
@@ -208,10 +214,38 @@ the dominant one first.
 Only a single-URL fetch with no pipe, redirection, or extra argument is rewritten;
 anything more complex is left untouched.
 
-Install the plugin with your Claude Code plugin manager and make sure `whyfail` is on
-`PATH`. `whyfail doctor` checks the binary (and whether the one on `PATH` is stale),
-`gh`, the cache, stats and endpoint reachability — it does not verify that the plugin
-itself is installed.
+One command installs it:
+
+```sh
+whyfail init                       # plugin via the claude CLI (marketplace + install)
+whyfail init --hooks-only          # no plugin system: settings.json, commands and skill
+whyfail init --mcp                 # also register the MCP server
+whyfail init --dry-run             # print the steps and change nothing
+whyfail init --uninstall           # reverse whatever init did
+```
+
+The plugin path is the default because the plugin manager owns updates and
+enable/disable. `--hooks-only` exists for anyone who would rather not use the plugin
+system: it appends the same two `PreToolUse` entries to `settings.json` — leaving every
+other key and hook untouched — and copies the commands and skill into `~/.claude`. It
+refuses when the plugin is already enabled, so the hooks never run twice. Both paths
+need `whyfail` on `PATH`, because the hooks execute it directly.
+
+`whyfail doctor` reports which of these is in place — plugin enabled, plugin disabled,
+hooks-only, or not installed — by reading `settings.json`, so it stays offline.
+
+### MCP server
+
+`whyfail mcp` is a stdio MCP server exposing two tools, `prow_run` (a run digest) and
+`prow_job` (health over retained history). Register it with `whyfail init --mcp`, or by
+hand:
+
+```sh
+claude mcp add whyfail -s user -- whyfail mcp
+```
+
+It is independent of the hook: the hook rewrites `Bash` and `WebFetch`, while the MCP
+server gives Claude typed tools. Both can be installed together.
 
 ## Savings
 
