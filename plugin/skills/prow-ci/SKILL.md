@@ -31,8 +31,8 @@ Never curl Prow, GCS, Sippy, or search.ci directly.
 
 ## Output contract
 
-- `--json` returns the structured form (`whyfail/v1` for runs) on every command
-  except `doctor`.
+- `--json` returns the `whyfail/v1` document on every emitting command; `doctor` is
+  text-only.
 - The JSON digest includes counts, `monitor_causes`, and artifact inventory.
 - Never claim a job "has never passed" — always read the printed window
   (`window <from> → <to>`) and the pass-rate denominator.
@@ -60,5 +60,6 @@ whyfail log <prow-url> <step> [--tail N]  bounded build-log view
 whyfail artifact <gcs-url> [--list]       metadata and excerpt / prefix listing
 whyfail search <regex> [--max-age 48h]    search.ci match counts
 whyfail gain [--history] [--by repo]      savings statistics
+whyfail init [--hooks-only] [--mcp]       install the Claude Code integration
 whyfail doctor                            connectivity and hook checks
 ```
