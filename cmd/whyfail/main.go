@@ -413,25 +413,14 @@ func newArtifactCmd(g *globals) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				var buf bytes.Buffer
-				st := g.style()
+				entries := make([]render.ArtifactEntry, len(objs))
 				var total int64
-				for _, o := range objs {
+				for i, o := range objs {
+					entries[i] = render.ArtifactEntry{Name: o.Name, Size: o.Size}
 					total += o.Size
-					fmt.Fprintf(&buf, "  %s  %s\n",
-						st.Dim(term.PadLeft(render.FormatBytes(o.Size), 9)),
-						term.TruncMiddle(o.Name, st.Width()-14))
 				}
-				if truncated {
-					// ListLimit reads one page, so the true total is unknown and
-					// "at least" is the honest wording.
-					fmt.Fprintf(&buf, "  %s\n", st.Dim(fmt.Sprintf(
-						"%d of at least %d objects, %s shown · use --limit 0 for all",
-						len(objs), len(objs)+1, render.FormatBytes(total))))
-				} else {
-					fmt.Fprintf(&buf, "  %s\n", st.Dim(fmt.Sprintf("%d objects, %s total",
-						len(objs), render.FormatBytes(total))))
-				}
+				var buf bytes.Buffer
+				render.ArtifactList(&buf, g.style(), entries, truncated)
 				g.emit(&buf, stats.Record{Cmd: "artifact-list", Target: object, InventoryBytes: total}, c, start)
 				return nil
 			}
@@ -468,23 +457,15 @@ func newArtifactCmd(g *globals) *cobra.Command {
 				metaOut["truncated"] = meta.Size > int64(len(data))
 				writeJSON(&buf, metaOut)
 			} else {
-				fmt.Fprintf(&buf, "%s\n  size: %s\n  type: %s\n  updated: %s\n", object,
-					render.FormatBytes(meta.Size), meta.ContentType, meta.Updated)
-				if isLog {
-					lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-					if len(lines) > 120 {
-						lines = lines[len(lines)-120:]
-					}
-					buf.WriteString("\n--- tail ---\n")
-					buf.WriteString(strings.Join(lines, "\n"))
-					buf.WriteString("\n")
-				} else if len(data) > 0 && isText(data) {
-					buf.WriteString("\n--- excerpt ---\n")
-					buf.Write(data)
-					if meta.Size > int64(len(data)) {
-						fmt.Fprintf(&buf, "\n... (%s truncated at %s)\n", render.FormatBytes(meta.Size), render.FormatBytes(maxExcerpt))
-					}
-				}
+				render.Artifact(&buf, g.style(), render.ArtifactInfo{
+					Name:        object,
+					Size:        meta.Size,
+					ContentType: meta.ContentType,
+					Updated:     meta.Updated,
+					Data:        data,
+					IsLog:       isLog,
+					Truncated:   meta.Size > int64(len(data)),
+				})
 			}
 			g.emit(&buf, stats.Record{Cmd: "artifact", Target: object, InventoryBytes: meta.Size}, c, start)
 			return nil
@@ -513,15 +494,6 @@ func listArtifacts(ctx context.Context, c *gcs.Client, bucket, prefix string, li
 	return objs, false, nil
 }
 
-func isText(b []byte) bool {
-	for _, c := range b {
-		if c == 0 {
-			return false
-		}
-	}
-	return true
-}
-
 // ---------- search ----------
 
 func newSearchCmd(g *globals) *cobra.Command {
@@ -542,17 +514,7 @@ func newSearchCmd(g *globals) *cobra.Command {
 			if g.jsonOut {
 				writeJSON(&buf, res)
 			} else {
-				fmt.Fprintf(&buf, "%d matching jobs in the last %s\n", res.Matches, maxAge)
-				for i, j := range res.Jobs {
-					if i >= 10 {
-						fmt.Fprintf(&buf, "  ... and %d more\n", len(res.Jobs)-10)
-						break
-					}
-					fmt.Fprintf(&buf, "  %s\n", j)
-				}
-				if res.KnownBug != "" {
-					fmt.Fprintf(&buf, "known bug referenced: %s\n", res.KnownBug)
-				}
+				render.Search(&buf, g.style(), res.Matches, res.Jobs, res.KnownBug, maxAge)
 			}
 			g.emit(&buf, stats.Record{Cmd: "search", Target: args[0]}, c, start)
 			return nil
@@ -592,11 +554,7 @@ func newGainCmd(g *globals) *cobra.Command {
 				if start < 0 {
 					start = 0
 				}
-				for _, r := range recs[start:] {
-					fmt.Fprintf(&buf, "%s  %-8s %10s → %8s  %s\n",
-						r.TS.Format("2006-01-02 15:04"), r.Cmd,
-						render.FormatBytes(r.ReadBytes), render.FormatBytes(r.EmittedBytes), r.Target)
-				}
+				render.History(&buf, g.style(), recs[start:])
 				_, _ = os.Stdout.Write(buf.Bytes())
 				return nil
 			}
@@ -650,29 +608,32 @@ func newDoctorCmd(g *globals) *cobra.Command {
 		Short: "Check binary, cache, stats, and endpoint reachability",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient(g)
-			doctorLocal(os.Stdout, c.CacheDir)
+			st := g.style()
+			doctorLocal(os.Stdout, st, c.CacheDir)
 
+			// The probes write as they finish rather than buffering the card, so
+			// a slow endpoint cannot leave the terminal blank.
 			ctx1, cancel1 := context.WithTimeout(context.Background(), 8*time.Second)
 			if _, err := c.ListLimit(ctx1, g.bucket, "pr-logs/directory/", 5); err == nil {
-				fmt.Println("gcs:       ok")
+				doctorLine(os.Stdout, st, "gcs", st.Green("ok"))
 			} else {
-				fmt.Printf("gcs:       FAILED: %v\n", err)
+				doctorLine(os.Stdout, st, "gcs", st.Red("FAILED: "+err.Error()))
 			}
 			cancel1()
 
 			ctx2, cancel2 := context.WithTimeout(context.Background(), 8*time.Second)
-			if s := enrich.SippyStatus(ctx2, c.HTTP, "0"); s == "unknown" {
-				fmt.Println("sippy:     unreachable or unexpected response")
+			if sippy := enrich.SippyStatus(ctx2, c.HTTP, "0"); sippy == "unknown" {
+				doctorLine(os.Stdout, st, "sippy", st.Yellow("unreachable or unexpected response"))
 			} else {
-				fmt.Printf("sippy:     ok (%s)\n", s)
+				doctorLine(os.Stdout, st, "sippy", st.Green("ok ("+sippy+")"))
 			}
 			cancel2()
 
 			ctx3, cancel3 := context.WithTimeout(context.Background(), 10*time.Second)
 			if _, err := enrich.SearchCI(ctx3, c.HTTP, "whyfail-doctor-probe", "1h"); err == nil {
-				fmt.Println("search.ci: ok")
+				doctorLine(os.Stdout, st, "search.ci", st.Green("ok"))
 			} else {
-				fmt.Printf("search.ci: FAILED: %v\n", err)
+				doctorLine(os.Stdout, st, "search.ci", st.Red("FAILED: "+err.Error()))
 			}
 			cancel3()
 			return nil
@@ -680,14 +641,22 @@ func newDoctorCmd(g *globals) *cobra.Command {
 	}
 }
 
+// doctorLine writes one dim-labelled prerequisite row, aligned with the gutter
+// the rest of the tool uses.
+func doctorLine(w io.Writer, st term.Style, label, value string) {
+	fmt.Fprintf(w, "%s %s\n", st.Dim(term.PadRight(label+":", 10)), value)
+}
+
 // doctorLocal writes the prerequisite checks that need no network. It takes a
-// writer so the report can be tested without a live bucket.
-func doctorLocal(w io.Writer, cacheDir string) {
-	fmt.Fprintf(w, "version:   %s\n", version)
-	fmt.Fprintf(w, "cache:     %s\n", cacheDir)
-	fmt.Fprintf(w, "stats:     %s (enabled=%v)\n", stats.Path(), stats.Enabled())
-	fmt.Fprintf(w, "binary:    %s\n", binaryStatus())
-	fmt.Fprintf(w, "gh:        %s\n", ghStatus())
+// writer so the report can be tested without a live bucket. Nothing here is
+// recorded in stats: doctor reads no artifacts, so counting it would inflate
+// `gain` with calls that saved nothing.
+func doctorLocal(w io.Writer, st term.Style, cacheDir string) {
+	doctorLine(w, st, "version", version)
+	doctorLine(w, st, "cache", cacheDir)
+	doctorLine(w, st, "stats", fmt.Sprintf("%s (enabled=%v)", stats.Path(), stats.Enabled()))
+	doctorLine(w, st, "binary", binaryStatus())
+	doctorLine(w, st, "gh", ghStatus())
 }
 
 // binaryStatus names the whyfail on PATH and calls out when it is not the
@@ -770,44 +739,12 @@ func newPRCmd(g *globals) *cobra.Command {
 			if g.jsonOut {
 				writeJSON(&buf, map[string]any{"pr": args[0], "title": title, "sha": sha, "failing": cards})
 			} else {
-				st := g.style()
-				fmt.Fprintf(&buf, "%s/%s%s  %s\n\n", org, repo, st.Cyan("#"+num), title)
-				if len(cards) == 0 {
-					fmt.Fprintln(&buf, "no failing checks on the head commit")
-				}
-				jobW := st.Width() - 44
-				if jobW < 24 {
-					jobW = 24
-				}
-				if jobW > 60 {
-					jobW = 60
-				}
-				bad := 0
-				for _, cd := range cards {
-					buf.WriteString(prCardLine(st, cd, jobW))
-					if cd.Health != nil && cd.Health.Verdict.IsBad() {
-						bad++
-					}
-				}
-				if bad > 0 && bad == len(cards) {
-					fmt.Fprintf(&buf, "\n  %s\n", st.Yellow("all failing jobs have poor history — the PR is probably not the cause"))
-				}
+				render.PR(&buf, g.style(), org, repo, num, title, cards)
 			}
 			g.emit(&buf, stats.Record{Cmd: "pr", Target: org + "/" + repo + "#" + num, Repo: org + "/" + repo}, c, start)
 			return nil
 		},
 	}
-}
-
-// prCard is one failing check on a PR head commit. Prow is false for a check
-// that has no Prow job to look up at all — a GitHub Actions job, say. Health is
-// nil when the job could not be looked up, usually a base-branch rename, which
-// makes the synthesised job name wrong.
-type prCard struct {
-	Check  string          `json:"check"`
-	Job    string          `json:"job,omitempty"`
-	Prow   bool            `json:"prow"`
-	Health *health.Summary `json:"health"`
 }
 
 // commitStatus is one entry from the legacy commit-status API, which Prow uses.
@@ -846,7 +783,7 @@ func failingCheckRun(r checkRun) bool {
 // through the legacy commit-status API and Actions through the Checks API, so
 // both are needed: reading statuses alone hides every Actions failure, and the
 // command then claims the PR has none.
-func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org, repo, branch, sha string, window time.Duration) ([]prCard, error) {
+func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org, repo, branch, sha string, window time.Duration) ([]render.PRCard, error) {
 	base := "repos/" + org + "/" + repo + "/commits/" + sha
 
 	statusRaw, err := api(base+"/statuses?per_page=100", true)
@@ -866,7 +803,7 @@ func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org,
 		return nil, fmt.Errorf("decode check runs: %w", err)
 	}
 
-	var cards []prCard
+	var cards []render.PRCard
 	seen := map[string]bool{}
 	// Statuses first: the API returns the newest entry per context first, and
 	// Prow's names are the ones job-name synthesis understands.
@@ -882,10 +819,10 @@ func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org,
 		if test == s.Context || test == "" {
 			// A failing check with no Prow job behind it: report it rather than
 			// dropping it, which is what made an all-Actions PR look clean.
-			cards = append(cards, prCard{Check: s.Context})
+			cards = append(cards, render.PRCard{Check: s.Context})
 			continue
 		}
-		cards = append(cards, prCard{
+		cards = append(cards, render.PRCard{
 			Check: s.Context,
 			Job:   "pull-ci-" + org + "-" + repo + "-" + branch + "-" + test,
 			Prow:  true,
@@ -896,7 +833,7 @@ func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org,
 			continue
 		}
 		seen[r.Name] = true
-		cards = append(cards, prCard{Check: r.Name})
+		cards = append(cards, render.PRCard{Check: r.Name})
 	}
 
 	// Each Collect already fans out internally, so keep the outer width small.
@@ -945,31 +882,6 @@ func decodeCheckRunPages(b []byte) ([]checkRun, error) {
 		}
 		out = append(out, page.CheckRuns...)
 	}
-}
-
-// prCardLine renders one check. A nil Health is reported as an unknown Prow job
-// or as a check with no Prow job behind it, never as healthy.
-func prCardLine(st term.Style, cd prCard, jobW int) string {
-	name := cd.Job
-	if name == "" {
-		name = cd.Check
-	}
-	name = term.PadRight(term.TruncMiddle(name, jobW), jobW)
-	if cd.Health == nil {
-		if !cd.Prow {
-			return fmt.Sprintf("  %s %s %s\n", name,
-				st.Red(term.PadRight("✗ FAILED", 11)),
-				st.Dim("no Prow job for this check"))
-		}
-		return fmt.Sprintf("  %s %s %s\n", name,
-			st.Dim(term.PadRight("? UNKNOWN", 11)),
-			st.Dim("no history in this bucket"))
-	}
-	icon, label := render.VerdictLabel(cd.Health.Verdict)
-	return fmt.Sprintf("  %s %s %s %s pass (%d runs)\n", name,
-		render.VerdictText(st, cd.Health.Verdict, icon),
-		render.VerdictText(st, cd.Health.Verdict, term.PadRight(label, 9)),
-		st.Dim(health.FormatRate(cd.Health.PassRate)), cd.Health.Runs)
 }
 
 // ghAPI is one `gh api` request. paginate follows the Link header and returns

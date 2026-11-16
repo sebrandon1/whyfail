@@ -1,0 +1,8 @@
+run/artifacts/gather/build-log.txt
+  SIZE      2.0 KB
+  TYPE      text/plain
+  UPDATED   2026-11-13T02:12:00Z
+
+--- tail ---
+line one
+line two

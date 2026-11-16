@@ -86,7 +86,10 @@ Command-specific flags:
 ### Output
 
 Human output is one card with a fixed 9-character label gutter, colour-coded
-verdicts, and everything folded to the terminal width; `--json` stays structured:
+verdicts, and everything folded to the terminal width; `--json` stays structured.
+Every human path uses the same gutter — `run`, `job`, `failures`, `pr`, `gain`,
+`gain --history`, `search`, `artifact` and `doctor` — so `--width` and `--color`
+apply uniformly:
 
 ```
 pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename

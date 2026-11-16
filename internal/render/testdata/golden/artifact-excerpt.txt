@@ -1,0 +1,8 @@
+run/artifacts/prowjob.json
+  SIZE      97.7 KB
+  TYPE      application/json
+  UPDATED   2026-11-13T02:12:00Z
+
+--- excerpt ---
+{"kind":"ProwJob"}
+... (97.7 KB truncated at 64.0 KB)

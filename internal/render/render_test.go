@@ -365,3 +365,136 @@ func TestGainEmptyAndPopulated(t *testing.T) {
 	}
 	golden(t, "gain.txt", out)
 }
+
+func TestPRCardLine(t *testing.T) {
+	st := term.Config(new(bytes.Buffer), "never", 100)
+	const job = "pull-ci-org-repo-main-e2e-aws"
+
+	// A job that is not in the bucket must not panic or read as healthy.
+	unknown := PRCardLine(st, PRCard{Job: job, Prow: true}, 40)
+	if !strings.Contains(unknown, "UNKNOWN") || !strings.Contains(unknown, "no history in this bucket") {
+		t.Errorf("nil health: %q", unknown)
+	}
+
+	// A check with no Prow job behind it is a failure, not an unknown job.
+	nonProw := PRCardLine(st, PRCard{Check: "build-and-test"}, 40)
+	if !strings.Contains(nonProw, "FAILED") || !strings.Contains(nonProw, "no Prow job") {
+		t.Errorf("non-Prow check: %q", nonProw)
+	}
+
+	flaky := PRCardLine(st, PRCard{Job: job, Prow: true, Health: &health.Summary{
+		Verdict: health.VerdictFlaky, PassRate: 0.5, Runs: 10,
+	}}, 40)
+	for _, want := range []string{"FLAKY", "50.0%", "10 runs"} {
+		if !strings.Contains(flaky, want) {
+			t.Errorf("flaky line missing %q: %q", want, flaky)
+		}
+	}
+
+	// The job column is 40; the suffix must still fit the 100-column style.
+	long := PRCardLine(st, PRCard{Job: strings.Repeat("x", 200), Prow: true}, 40)
+	if n := term.Visible(strings.SplitN(long, "\n", 2)[0]); n > st.Width() {
+		t.Errorf("line is %d columns wide: %q", n, long)
+	}
+}
+
+func TestIsText(t *testing.T) {
+	if !isText([]byte("hello\nworld")) {
+		t.Error("plain text should be text")
+	}
+	if isText([]byte{'a', 0, 'b'}) {
+		t.Error("NUL byte should be binary")
+	}
+}
+
+func historyRecords() []stats.Record {
+	return []stats.Record{
+		{TS: time.Date(2026, 11, 15, 4, 38, 0, 0, time.UTC), Cmd: "log",
+			Target:    "pr-logs/pull/rh-ecosystem-edge_recert/2364/job/2/artifacts/gather/build-log.txt",
+			ReadBytes: 10_300, EmittedBytes: 210},
+		{TS: time.Date(2026, 11, 15, 4, 37, 0, 0, time.UTC), Cmd: "run",
+			Target:    "pull-ci-rh-ecosystem-edge-recert-main-e2e/2120987667142283264",
+			ReadBytes: 11_200_000, EmittedBytes: 4_900},
+	}
+}
+
+func TestHistoryGolden(t *testing.T) {
+	var buf bytes.Buffer
+	History(&buf, testStyle(), historyRecords())
+	golden(t, "history.txt", buf.String())
+}
+
+func TestSearchGolden(t *testing.T) {
+	var buf bytes.Buffer
+	Search(&buf, testStyle(), 48,
+		[]string{"pull-ci-org-repo-main-e2e-aws", "pull-ci-org-repo-main-e2e-gcp"}, "OCPBUGS-1234", "48h")
+	golden(t, "search.txt", buf.String())
+}
+
+func TestArtifactListGolden(t *testing.T) {
+	var buf bytes.Buffer
+	ArtifactList(&buf, testStyle(), []ArtifactEntry{
+		{Name: "artifacts/prowjob.json", Size: 12_300},
+		{Name: "artifacts/ci-operator-step-graph.json", Size: 418_000},
+	}, false)
+	golden(t, "artifact-list.txt", buf.String())
+
+	var truncated bytes.Buffer
+	ArtifactList(&truncated, testStyle(), []ArtifactEntry{
+		{Name: "artifacts/prowjob.json", Size: 12_300},
+	}, true)
+	golden(t, "artifact-list-truncated.txt", truncated.String())
+}
+
+func TestArtifactGolden(t *testing.T) {
+	var log bytes.Buffer
+	Artifact(&log, testStyle(), ArtifactInfo{
+		Name: "run/artifacts/gather/build-log.txt", Size: 2048,
+		ContentType: "text/plain", Updated: "2026-11-13T02:12:00Z",
+		Data: []byte("line one\nline two\n"), IsLog: true,
+	})
+	golden(t, "artifact-log.txt", log.String())
+
+	var excerpt bytes.Buffer
+	Artifact(&excerpt, testStyle(), ArtifactInfo{
+		Name: "run/artifacts/prowjob.json", Size: 99_999,
+		ContentType: "application/json", Updated: "2026-11-13T02:12:00Z",
+		Data: []byte(`{"kind":"ProwJob"}`), Truncated: true, Limit: 64 << 10,
+	})
+	golden(t, "artifact-excerpt.txt", excerpt.String())
+}
+
+func TestPRGolden(t *testing.T) {
+	flaky := &health.Summary{Verdict: health.VerdictFlaky, PassRate: 0.638, Runs: 154}
+	var buf bytes.Buffer
+	PR(&buf, testStyle(), "rh-ecosystem-edge", "recert", "2364", "CNF-30065: add integration scenarios", []PRCard{
+		{Check: "ci/prow/e2e-aws", Job: "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws", Prow: true, Health: flaky},
+		{Check: "ci/prow/missing", Job: "pull-ci-rh-ecosystem-edge-recert-main-missing", Prow: true},
+		{Check: "lint"},
+	})
+	golden(t, "pr.txt", buf.String())
+}
+
+// TestRenderWidths is the regression guard for the whole ledger: no path may
+// paint a line wider than the terminal it was given.
+func TestRenderWidths(t *testing.T) {
+	narrow := term.Config(new(bytes.Buffer), "never", 60)
+	var buf bytes.Buffer
+	History(&buf, narrow, historyRecords())
+	Search(&buf, narrow, 3, []string{"pull-ci-org-repo-main-e2e-aws-with-a-very-long-name-that-goes-on"}, "", "48h")
+	ArtifactList(&buf, narrow, []ArtifactEntry{{Name: "artifacts/" + strings.Repeat("x", 120), Size: 1024}}, false)
+	Artifact(&buf, narrow, ArtifactInfo{
+		Name: "run/artifacts/gather/build-log.txt", Size: 2048,
+		ContentType: "text/plain", Updated: "2026-11-13T02:12:00Z",
+		Data: []byte("line one\n"), IsLog: true,
+	})
+	PR(&buf, narrow, "org", "repo", "1", "a long enough title to fold", []PRCard{
+		{Check: "ci/prow/x", Job: "pull-ci-org-repo-main-" + strings.Repeat("y", 80), Prow: true},
+	})
+
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if n := term.Visible(line); n > 60 {
+			t.Errorf("line is %d columns wide: %q", n, line)
+		}
+	}
+}
