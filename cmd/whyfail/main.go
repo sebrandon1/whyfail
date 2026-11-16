@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -649,15 +650,7 @@ func newDoctorCmd(g *globals) *cobra.Command {
 		Short: "Check binary, cache, stats, and endpoint reachability",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient(g)
-
-			fmt.Printf("version:   %s\n", version)
-			fmt.Printf("cache:     %s\n", c.CacheDir)
-			fmt.Printf("stats:     %s (enabled=%v)\n", stats.Path(), stats.Enabled())
-			if p, err := exec.LookPath("whyfail"); err == nil {
-				fmt.Printf("binary:    %s\n", p)
-			} else {
-				fmt.Println("binary:    not on PATH (hooks will fail)")
-			}
+			doctorLocal(os.Stdout, c.CacheDir)
 
 			ctx1, cancel1 := context.WithTimeout(context.Background(), 8*time.Second)
 			if _, err := c.ListLimit(ctx1, g.bucket, "pr-logs/directory/", 5); err == nil {
@@ -687,8 +680,52 @@ func newDoctorCmd(g *globals) *cobra.Command {
 	}
 }
 
-// ---------- pr ----------
+// doctorLocal writes the prerequisite checks that need no network. It takes a
+// writer so the report can be tested without a live bucket.
+func doctorLocal(w io.Writer, cacheDir string) {
+	fmt.Fprintf(w, "version:   %s\n", version)
+	fmt.Fprintf(w, "cache:     %s\n", cacheDir)
+	fmt.Fprintf(w, "stats:     %s (enabled=%v)\n", stats.Path(), stats.Enabled())
+	fmt.Fprintf(w, "binary:    %s\n", binaryStatus())
+	fmt.Fprintf(w, "gh:        %s\n", ghStatus())
+}
 
+// binaryStatus names the whyfail on PATH and calls out when it is not the
+// binary being run — the usual surprise after a rebuild.
+func binaryStatus() string {
+	onPath, err := exec.LookPath("whyfail")
+	if err != nil {
+		return "not on PATH (hooks will fail)"
+	}
+	self, err := os.Executable()
+	if err != nil || sameFile(self, onPath) {
+		return onPath
+	}
+	return onPath + " (running " + self + ", possibly stale)"
+}
+
+// ghStatus reports the CLI the pr command needs, rather than letting pr fail
+// after it has been typed.
+func ghStatus() string {
+	p, err := exec.LookPath("gh")
+	if err != nil {
+		return "missing (whyfail pr will not work)"
+	}
+	return p
+}
+
+// sameFile compares two paths after resolving symlinks, so a linked install is
+// not reported as stale.
+func sameFile(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return ra == rb
+}
+
+// ---------- pr ----------
 var prURLRe = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$`)
 
 // prFanOut is how many failing checks are looked up at once. Each health.Collect

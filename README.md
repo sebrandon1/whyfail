@@ -172,8 +172,9 @@ Only a single-URL fetch with no pipe, redirection, or extra argument is rewritte
 anything more complex is left untouched.
 
 Install the plugin with your Claude Code plugin manager and make sure `whyfail` is on
-`PATH`. `whyfail doctor` checks the binary, cache, stats and endpoint reachability —
-it does not verify that the plugin itself is installed.
+`PATH`. `whyfail doctor` checks the binary (and whether the one on `PATH` is stale),
+`gh`, the cache, stats and endpoint reachability — it does not verify that the plugin
+itself is installed.
 
 ## Savings
 

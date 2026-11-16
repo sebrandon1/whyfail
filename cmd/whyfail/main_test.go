@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -325,5 +327,38 @@ func TestListArtifacts(t *testing.T) {
 	}
 	if len(objs) != 1 || truncated {
 		t.Fatalf("small: len=%d truncated=%v", len(objs), truncated)
+	}
+}
+
+func TestDoctorLocal(t *testing.T) {
+	var buf bytes.Buffer
+	doctorLocal(&buf, "/tmp/cache")
+	out := buf.String()
+	for _, want := range []string{"version:", "cache:     /tmp/cache", "stats:", "binary:", "gh:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestSameFile(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "whyfail")
+	if err := os.WriteFile(real, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if !sameFile(real, link) {
+		t.Error("a symlink to the same file must compare equal")
+	}
+	other := filepath.Join(dir, "other")
+	if err := os.WriteFile(other, []byte("y"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if sameFile(real, other) {
+		t.Error("different files compared equal")
 	}
 }
