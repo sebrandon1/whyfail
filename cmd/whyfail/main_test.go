@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/sebrandon1/whyfail/internal/gcstest"
-	"github.com/sebrandon1/whyfail/internal/health"
 	"github.com/sebrandon1/whyfail/internal/run"
 	"github.com/sebrandon1/whyfail/internal/term"
 )
@@ -64,15 +63,6 @@ func TestTopSignature(t *testing.T) {
 	}
 }
 
-func TestIsText(t *testing.T) {
-	if !isText([]byte("hello\nworld")) {
-		t.Error("plain text should be text")
-	}
-	if isText([]byte{'a', 0, 'b'}) {
-		t.Error("NUL byte should be binary")
-	}
-}
-
 func TestParseSince(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -106,38 +96,6 @@ func TestStringField(t *testing.T) {
 	}
 	if got := stringField(m, "user", "sha"); got != "" {
 		t.Errorf("missing field: %q", got)
-	}
-}
-
-func TestPRCardLine(t *testing.T) {
-	st := term.Config(new(bytes.Buffer), "never", 100)
-	const job = "pull-ci-org-repo-main-e2e-aws"
-
-	// A job that is not in the bucket must not panic or read as healthy.
-	unknown := prCardLine(st, prCard{Job: job, Prow: true}, 40)
-	if !strings.Contains(unknown, "UNKNOWN") || !strings.Contains(unknown, "no history in this bucket") {
-		t.Errorf("nil health: %q", unknown)
-	}
-
-	// A check with no Prow job behind it is a failure, not an unknown job.
-	nonProw := prCardLine(st, prCard{Check: "build-and-test"}, 40)
-	if !strings.Contains(nonProw, "FAILED") || !strings.Contains(nonProw, "no Prow job") {
-		t.Errorf("non-Prow check: %q", nonProw)
-	}
-
-	flaky := prCardLine(st, prCard{Job: job, Prow: true, Health: &health.Summary{
-		Verdict: health.VerdictFlaky, PassRate: 0.5, Runs: 10,
-	}}, 40)
-	for _, want := range []string{"FLAKY", "50.0%", "10 runs"} {
-		if !strings.Contains(flaky, want) {
-			t.Errorf("flaky line missing %q: %q", want, flaky)
-		}
-	}
-
-	// The job column is 40; the suffix must still fit the 100-column style.
-	long := prCardLine(st, prCard{Job: strings.Repeat("x", 200), Prow: true}, 40)
-	if n := term.Visible(strings.SplitN(long, "\n", 2)[0]); n > st.Width() {
-		t.Errorf("line is %d columns wide: %q", n, long)
 	}
 }
 
@@ -332,7 +290,7 @@ func TestListArtifacts(t *testing.T) {
 
 func TestDoctorLocal(t *testing.T) {
 	var buf bytes.Buffer
-	doctorLocal(&buf, "/tmp/cache")
+	doctorLocal(&buf, term.Config(new(bytes.Buffer), "never", 100), "/tmp/cache")
 	out := buf.String()
 	for _, want := range []string{"version:", "cache:     /tmp/cache", "stats:", "binary:", "gh:"} {
 		if !strings.Contains(out, want) {

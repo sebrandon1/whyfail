@@ -717,3 +717,242 @@ func FormatCount(n int64) string {
 		return fmt.Sprintf("%d", n)
 	}
 }
+
+// ---------- history ----------
+
+// History renders `whyfail gain --history`: one row per recorded call, with the
+// target middle-truncated so the useful end survives a narrow terminal.
+func History(w io.Writer, st term.Style, recs []stats.Record) {
+	if len(recs) == 0 {
+		fmt.Fprintln(w, "no recorded calls yet")
+		return
+	}
+	const (
+		whenW   = 16 // 2006-01-02 15:04
+		cmdW    = 12
+		bytesW  = 24
+		gapW    = 2 + whenW + 1 + cmdW + 1 + bytesW + 1
+		minName = 12
+	)
+	targetW := st.Width() - gapW
+	// On a narrow terminal there is no room for a target column at all; drop it
+	// rather than squeezing every line past the width.
+	showTarget := targetW >= minName
+	if showTarget {
+		fmt.Fprintf(w, "%s %s\n\n", st.Bold("recent calls"), st.Dim(fmt.Sprintf("(%d, newest last)", len(recs))))
+	} else {
+		fmt.Fprintf(w, "%s %s\n\n", st.Bold("recent calls"), st.Dim(fmt.Sprintf("(%d, newest last)", len(recs))))
+	}
+	header := fmt.Sprintf("  %s %s %s",
+		st.Dim(term.PadRight("WHEN", whenW)),
+		st.Dim(term.PadRight("CMD", cmdW)),
+		st.Dim(term.PadLeft("READ → EMITTED", bytesW)))
+	if showTarget {
+		header += " " + st.Dim("TARGET")
+	}
+	fmt.Fprintln(w, header)
+	for _, r := range recs {
+		line := fmt.Sprintf("  %s %s %s",
+			st.Dim(r.TS.Format("2006-01-02 15:04")),
+			term.PadRight(term.Trunc(r.Cmd, cmdW), cmdW),
+			term.PadLeft(fmt.Sprintf("%s → %s", FormatBytes(r.ReadBytes), FormatBytes(r.EmittedBytes)), bytesW))
+		if showTarget {
+			line += " " + st.Dim(term.TruncMiddle(r.Target, targetW))
+		}
+		fmt.Fprintln(w, line)
+	}
+}
+
+// ---------- search ----------
+
+// Search renders a search.ci result: a headline count, up to ten matching jobs,
+// and the known bug when the search found one.
+func Search(w io.Writer, st term.Style, matches int, jobs []string, knownBug, maxAge string) {
+	fmt.Fprintf(w, "%s %s\n", st.Bold(fmt.Sprintf("%d matching jobs", matches)),
+		st.Dim("in the last "+maxAge))
+	shown := jobs
+	if len(shown) > 10 {
+		shown = shown[:10]
+	}
+	nameW := st.Width() - 2
+	if nameW < 12 {
+		nameW = 12
+	}
+	for _, j := range shown {
+		fmt.Fprintf(w, "  %s\n", term.TruncMiddle(j, nameW))
+	}
+	if more := len(jobs) - len(shown); more > 0 {
+		fmt.Fprintf(w, "  %s\n", st.Dim(fmt.Sprintf("… and %d more", more)))
+	}
+	if knownBug != "" {
+		fmt.Fprintln(w)
+		row(w, st, "KNOWN BUG", st.Cyan(knownBug))
+	}
+}
+
+// ---------- artifact ----------
+
+// ArtifactEntry is one object in an artifact listing.
+type ArtifactEntry struct {
+	Name string
+	Size int64
+}
+
+// ArtifactList renders a prefix listing, bounded by the caller. truncated says
+// the listing was cut, so the totals line can say so instead of inventing a
+// total it never read.
+func ArtifactList(w io.Writer, st term.Style, objs []ArtifactEntry, truncated bool) {
+	var total int64
+	nameW := st.Width() - 14
+	if nameW < 12 {
+		nameW = 12
+	}
+	for _, o := range objs {
+		total += o.Size
+		fmt.Fprintf(w, "  %s  %s\n", st.Dim(term.PadLeft(FormatBytes(o.Size), 9)),
+			term.TruncMiddle(o.Name, nameW))
+	}
+	if truncated {
+		fmt.Fprintf(w, "  %s\n", st.Dim(fmt.Sprintf(
+			"%d of at least %d objects, %s shown · use --limit 0 for all",
+			len(objs), len(objs)+1, FormatBytes(total))))
+		return
+	}
+	fmt.Fprintf(w, "  %s\n", st.Dim(fmt.Sprintf("%d objects, %s total", len(objs), FormatBytes(total))))
+}
+
+// ArtifactInfo is what `whyfail artifact` knows about one object.
+type ArtifactInfo struct {
+	Name        string
+	Size        int64
+	ContentType string
+	Updated     string
+	Data        []byte
+	IsLog       bool
+	Truncated   bool
+	// Limit is the read cap that produced Truncated, reported to the reader.
+	Limit int64
+}
+
+// Artifact renders one object's metadata plus a bounded excerpt. A build log is
+// shown as a tail; anything else textual as the head of the object.
+func Artifact(w io.Writer, st term.Style, a ArtifactInfo) {
+	fmt.Fprintln(w, st.Bold(a.Name))
+	row(w, st, "SIZE", FormatBytes(a.Size))
+	row(w, st, "TYPE", a.ContentType)
+	row(w, st, "UPDATED", a.Updated)
+
+	if a.IsLog {
+		lines := strings.Split(strings.TrimRight(string(a.Data), "\n"), "\n")
+		if len(lines) > 120 {
+			lines = lines[len(lines)-120:]
+		}
+		fmt.Fprintf(w, "\n%s\n%s\n", st.Dim("--- tail ---"), strings.Join(lines, "\n"))
+		return
+	}
+	if len(a.Data) == 0 || !isText(a.Data) {
+		return
+	}
+	fmt.Fprintf(w, "\n%s\n", st.Dim("--- excerpt ---"))
+	_, _ = w.Write(a.Data)
+	if a.Truncated {
+		limit := a.Limit
+		if limit <= 0 {
+			limit = int64(len(a.Data))
+		}
+		fmt.Fprintf(w, "\n%s\n", st.Dim(fmt.Sprintf("... (%s truncated at %s)",
+			FormatBytes(a.Size), FormatBytes(limit))))
+	}
+}
+
+// isText reports whether b looks like text rather than an archive or image.
+func isText(b []byte) bool {
+	for _, c := range b {
+		if c == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// ---------- pull request ----------
+
+// PRCard is one failing check on a PR head commit. Prow is false for a check
+// that has no Prow job to look up at all — a GitHub Actions job, say. Health is
+// nil when the job could not be looked up, usually a base-branch rename, which
+// makes the synthesised job name wrong.
+type PRCard struct {
+	Check  string          `json:"check"`
+	Job    string          `json:"job,omitempty"`
+	Prow   bool            `json:"prow"`
+	Health *health.Summary `json:"health"`
+}
+
+// PR renders a PR's failing checks against the shared gutter, so the check
+// column lines up with every other card.
+func PR(w io.Writer, st term.Style, org, repo, num, title string, cards []PRCard) {
+	fmt.Fprintf(w, "%s/%s%s  %s\n\n", org, repo, st.Cyan("#"+num), title)
+	if len(cards) == 0 {
+		fmt.Fprintln(w, "no failing checks on the head commit")
+		return
+	}
+	jobW := st.Width() - 44
+	if jobW < 24 {
+		jobW = 24
+	}
+	if jobW > 60 {
+		jobW = 60
+	}
+	bad := 0
+	for _, c := range cards {
+		fmt.Fprint(w, PRCardLine(st, c, jobW))
+		if c.Health != nil && c.Health.Verdict.IsBad() {
+			bad++
+		}
+	}
+	if bad > 0 && bad == len(cards) {
+		fmt.Fprintf(w, "\n  %s\n", st.Yellow("all failing jobs have poor history — the PR is probably not the cause"))
+	}
+}
+
+// cardLabelW is the width of the verdict column: icon, space, nine-char label.
+const cardLabelW = 11
+
+// PRCardLine renders one check. A nil Health is reported as an unknown Prow job
+// or as a check with no Prow job behind it, never as healthy. The detail column
+// is dropped rather than overflowing a narrow terminal.
+func PRCardLine(st term.Style, c PRCard, jobW int) string {
+	name := c.Job
+	if name == "" {
+		name = c.Check
+	}
+	name = term.PadRight(term.TruncMiddle(name, jobW), jobW)
+
+	detailW := st.Width() - (2 + jobW + 1 + cardLabelW + 1)
+	note := func(s string) string {
+		if detailW < 8 {
+			return ""
+		}
+		return " " + st.Dim(term.Trunc(s, detailW))
+	}
+
+	if c.Health == nil {
+		if !c.Prow {
+			return fmt.Sprintf("  %s %s%s\n", name,
+				st.Red(term.PadRight("✗ FAILED", cardLabelW)),
+				note("no Prow job for this check"))
+		}
+		return fmt.Sprintf("  %s %s%s\n", name,
+			st.Dim(term.PadRight("? UNKNOWN", cardLabelW)),
+			note("no history in this bucket"))
+	}
+	icon, label := VerdictLabel(c.Health.Verdict)
+	line := fmt.Sprintf("  %s %s %s",
+		name,
+		VerdictText(st, c.Health.Verdict, icon+" "+term.PadRight(label, 9)),
+		st.Dim(health.FormatRate(c.Health.PassRate)))
+	if extra := fmt.Sprintf("%d runs", c.Health.Runs); detailW >= 8+len(extra) {
+		line += st.Dim(" pass (" + extra + ")")
+	}
+	return line + "\n"
+}

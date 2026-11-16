@@ -1,0 +1,5 @@
+rh-ecosystem-edge/recert#2364  CNF-30065: add integration scenarios
+
+  pull-ci-rh-ecosystem-edge-recert-main-e2e-aws            ⚠ FLAKY     63.8% pass (154 runs)
+  pull-ci-rh-ecosystem-edge-recert-main-missing            ? UNKNOWN   no history in this bucket
+  lint                                                     ✗ FAILED    no Prow job for this check
