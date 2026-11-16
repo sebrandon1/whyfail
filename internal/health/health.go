@@ -8,16 +8,20 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sebrandon1/whyfail/internal/gcs"
+	"github.com/sebrandon1/whyfail/internal/parallel"
 )
 
 // ErrJobNotFound is returned when a job name matches neither the presubmit
 // index nor the periodic log layout. That is almost always a typo or a
 // renamed job, and it is worth saying so rather than printing an empty card.
 var ErrJobNotFound = errors.New("job not found")
+
+// fanOut bounds concurrent requests to the public bucket. A wide window on a
+// busy presubmit is a few hundred runs, and the bucket rate-limits.
+const fanOut = 16
 
 // RunResult is one historical run of a job.
 type RunResult struct {
@@ -70,41 +74,30 @@ func Collect(ctx context.Context, c *gcs.Client, bucket, job string, window time
 		return nil, err
 	}
 
-	results := make([]RunResult, 0, len(paths))
-	var mu sync.Mutex
-	sem := make(chan struct{}, 16)
-	var wg sync.WaitGroup
-
-	for _, p := range paths {
-		wg.Add(1)
-		go func(p runPath) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			rr := RunResult{ID: p.ID, Path: p.Path, Time: p.Updated}
-			data, err := c.Get(ctx, bucket, p.Path+"/finished.json")
-			if err == nil {
-				var f struct {
-					Result    string `json:"result"`
-					Timestamp int64  `json:"timestamp"`
-				}
-				if json.Unmarshal(data, &f) == nil {
-					rr.Result = f.Result
-					if f.Timestamp > 0 {
-						rr.Time = time.Unix(f.Timestamp, 0).UTC()
-					}
+	// Each goroutine writes its own slot, so the results are ordered by run
+	// rather than by completion.
+	results := make([]RunResult, len(paths))
+	parallel.Do(len(paths), fanOut, func(i int) {
+		p := paths[i]
+		rr := RunResult{ID: p.ID, Path: p.Path, Time: p.Updated}
+		data, err := c.Get(ctx, bucket, p.Path+"/finished.json")
+		if err == nil {
+			var f struct {
+				Result    string `json:"result"`
+				Timestamp int64  `json:"timestamp"`
+			}
+			if json.Unmarshal(data, &f) == nil {
+				rr.Result = f.Result
+				if f.Timestamp > 0 {
+					rr.Time = time.Unix(f.Timestamp, 0).UTC()
 				}
 			}
-			if rr.Result == "" {
-				rr.Result = "MISSING"
-			}
-			mu.Lock()
-			results = append(results, rr)
-			mu.Unlock()
-		}(p)
-	}
-	wg.Wait()
+		}
+		if rr.Result == "" {
+			rr.Result = "MISSING"
+		}
+		results[i] = rr
+	})
 
 	return summarize(job, results, window), nil
 }
@@ -121,7 +114,14 @@ func enumerate(ctx context.Context, c *gcs.Client, bucket, job string) ([]runPat
 	if err != nil {
 		return nil, err
 	}
-	var out []runPath
+	// Collect the index entries first, then resolve them in parallel: one
+	// sequential GET per retained run is the cold-start cost of this command.
+	type indexEntry struct {
+		id      string
+		name    string
+		updated time.Time
+	}
+	var entries []indexEntry
 	for _, o := range objs {
 		name := o.Name
 		if strings.HasSuffix(name, "/latest-build.txt") || !strings.HasSuffix(name, ".txt") {
@@ -132,18 +132,27 @@ func enumerate(ctx context.Context, c *gcs.Client, bucket, job string) ([]runPat
 			continue
 		}
 		updated, _ := time.Parse(time.RFC3339, o.Updated)
+		entries = append(entries, indexEntry{id: id, name: name, updated: updated})
+	}
 
-		data, err := c.Get(ctx, bucket, name)
+	paths := make([]string, len(entries))
+	parallel.Do(len(entries), fanOut, func(i int) {
+		data, err := c.Get(ctx, bucket, entries[i].name)
 		if err != nil {
+			return
+		}
+		p := strings.TrimSpace(string(data))
+		p = strings.TrimPrefix(p, "gs://"+bucket+"/")
+		p = strings.TrimPrefix(p, "gs://")
+		paths[i] = p
+	})
+
+	out := make([]runPath, 0, len(entries))
+	for i, e := range entries {
+		if paths[i] == "" {
 			continue
 		}
-		path := strings.TrimSpace(string(data))
-		path = strings.TrimPrefix(path, "gs://"+bucket+"/")
-		path = strings.TrimPrefix(path, "gs://")
-		if path == "" {
-			continue
-		}
-		out = append(out, runPath{ID: id, Path: path, Updated: updated})
+		out = append(out, runPath{ID: e.id, Path: paths[i], Updated: e.updated})
 	}
 	if len(out) > 0 {
 		return out, nil
