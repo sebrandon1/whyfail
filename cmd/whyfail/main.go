@@ -163,12 +163,9 @@ func newRunCmd(g *globals) *cobra.Command {
 			} else {
 				render.Digest(&buf, d, g.style())
 			}
-			rec := stats.Record{Cmd: "run", Target: ref.Job + "/" + ref.RunID}
+			rec := stats.Record{Cmd: "run", Target: ref.Job + "/" + ref.RunID, Repo: repoOf(d, ref)}
 			if d.Artifacts != nil {
 				rec.InventoryBytes = d.Artifacts.TotalBytes
-			}
-			if d.Run.PR != nil {
-				rec.Repo = d.Run.PR.Org + "/" + d.Run.PR.Repo
 			}
 			if d.Job != nil && d.Job.Health != nil {
 				rec.Verdict = string(d.Job.Health.Verdict)
@@ -230,6 +227,9 @@ func newJobCmd(g *globals) *cobra.Command {
 			} else {
 				render.Job(&buf, sum, g.style())
 			}
+			// No Repo: a job name alone does not identify a repository — both the
+			// org and the repo may contain the dashes the name is built from — so
+			// this records under (unknown) rather than guessing.
 			g.emit(&buf, stats.Record{Cmd: "job", Target: args[0], Verdict: string(sum.Verdict)}, c, start)
 			return nil
 		},
@@ -267,10 +267,19 @@ func newFailuresCmd(g *globals) *cobra.Command {
 			} else {
 				render.Failures(&buf, g.style(), d.Run.JobName, d.Run.Result, out.Failed, d.Tests)
 			}
-			g.emit(&buf, stats.Record{Cmd: "failures", Target: ref.Job + "/" + ref.RunID}, c, start)
+			g.emit(&buf, stats.Record{Cmd: "failures", Target: ref.Job + "/" + ref.RunID, Repo: repoOf(d, ref)}, c, start)
 			return nil
 		},
 	}
+}
+
+// repoOf returns the org/repo a run belongs to. prowjob.json is authoritative;
+// the object path covers a run whose prowjob.json is missing or periodic.
+func repoOf(d *run.Digest, ref prow.Ref) string {
+	if d != nil && d.Run != nil && d.Run.PR != nil && d.Run.PR.Org != "" && d.Run.PR.Repo != "" {
+		return d.Run.PR.Org + "/" + d.Run.PR.Repo
+	}
+	return prow.Repo(ref.ObjectPath)
 }
 
 // ---------- log ----------
@@ -307,7 +316,7 @@ func newLogCmd(g *globals) *cobra.Command {
 			} else {
 				buf.WriteString(out)
 			}
-			g.emit(&buf, stats.Record{Cmd: "log", Target: target}, c, start)
+			g.emit(&buf, stats.Record{Cmd: "log", Target: target, Repo: prow.Repo(ref.ObjectPath)}, c, start)
 			return nil
 		},
 	}

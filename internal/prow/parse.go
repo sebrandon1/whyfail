@@ -127,3 +127,22 @@ func IsRunURL(raw string) bool {
 	_, err := ParseRef(raw)
 	return err == nil
 }
+
+// Repo returns the "org/repo" a presubmit object path belongs to. Periodic
+// jobs live under logs/<job>/ and carry no repository, so they return "".
+// The org and repo share one path segment, joined by an underscore
+// (pr-logs/pull/rh-ecosystem-edge_recert/2364/<job>/<run>); a repository name
+// containing an underscore is split at the first one.
+func Repo(objectPath string) string {
+	parts := strings.Split(strings.Trim(objectPath, "/"), "/")
+	for i := 0; i < len(parts)-1; i++ {
+		if parts[i] != "pull" {
+			continue
+		}
+		if org, repo, ok := strings.Cut(parts[i+1], "_"); ok && org != "" && repo != "" {
+			return org + "/" + repo
+		}
+		return ""
+	}
+	return ""
+}

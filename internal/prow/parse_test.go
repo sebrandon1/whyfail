@@ -111,3 +111,18 @@ func TestObjectAndViewURL(t *testing.T) {
 		t.Fatalf("ObjectURL: %q", got)
 	}
 }
+
+func TestRepo(t *testing.T) {
+	cases := []struct{ path, want string }{
+		{"pr-logs/pull/rh-ecosystem-edge_recert/2364/job/2123", "rh-ecosystem-edge/recert"},
+		{"pr-logs/pull/openshift_cert-manager-operator/533/job/1", "openshift/cert-manager-operator"},
+		{"logs/periodic-ci-example/2123", ""},
+		{"pr-logs/pull/no-underscore/1/job/2", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := Repo(c.path); got != c.want {
+			t.Errorf("Repo(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}

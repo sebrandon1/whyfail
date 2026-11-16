@@ -147,3 +147,22 @@ func TestDisabled(t *testing.T) {
 		t.Fatalf("stats file should not exist, err=%v", err)
 	}
 }
+
+func TestSummarizeByRepo(t *testing.T) {
+	recs := []Record{
+		{Cmd: "run", Repo: "org/repo"},
+		{Cmd: "log", Repo: "org/repo"},
+		{Cmd: "job"},
+	}
+	a := Summarize(recs, "repo", time.Time{})
+	if a.Groups["org/repo"].Calls != 2 {
+		t.Fatalf("repo group: %+v", a.Groups)
+	}
+	// A record with no repository must not land in an unlabelled blank group.
+	if a.Groups["(unknown)"].Calls != 1 {
+		t.Fatalf("unknown group: %+v", a.Groups)
+	}
+	if _, ok := a.Groups[""]; ok {
+		t.Fatalf("blank group present: %+v", a.Groups)
+	}
+}
