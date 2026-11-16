@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,12 @@ type rtFunc func(*http.Request) (*http.Response, error)
 func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func fakeClient(t *testing.T, objects map[string]string, prefixes map[string][]string) *gcs.Client {
+	t.Helper()
+	return fakeClientAt(t, objects, prefixes, nil)
+}
+
+// fakeClientAt is fakeClient with an `updated` timestamp per listing entry.
+func fakeClientAt(t *testing.T, objects map[string]string, prefixes map[string][]string, updated func(string) time.Time) *gcs.Client {
 	t.Helper()
 	c := gcs.New(t.TempDir())
 	c.HTTP = &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
@@ -37,7 +44,13 @@ func fakeClient(t *testing.T, objects map[string]string, prefixes map[string][]s
 			sort.Strings(names)
 			items := make([]map[string]string, 0, len(names))
 			for _, n := range names {
-				items = append(items, map[string]string{"name": n, "size": "1"})
+				item := map[string]string{"name": n, "size": "1"}
+				if updated != nil {
+					if ts := updated(n); !ts.IsZero() {
+						item["updated"] = ts.Format(time.RFC3339)
+					}
+				}
+				items = append(items, item)
 			}
 			body, _ := json.Marshal(map[string]any{"items": items})
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body))), Header: http.Header{}}, nil
@@ -224,7 +237,9 @@ func TestWindowAndMissing(t *testing.T) {
 	rs = append(rs, RunResult{Result: "GONE", Time: rs[len(rs)-1].Time.Add(time.Hour)})
 	s := summarize("j", rs, 2*time.Hour)
 
-	if s.Runs != 6 {
+	// Runs describes the same set as the rate: the three inside the window, one
+	// of which is missing a finished.json.
+	if s.Runs != 3 {
 		t.Fatalf("runs: %d", s.Runs)
 	}
 	if s.Missing != 1 {
@@ -233,6 +248,72 @@ func TestWindowAndMissing(t *testing.T) {
 	// cutoff = last run - 2h, so runs at t=3h,4h,5h count: FAILURE, SUCCESS (and the missing one).
 	if s.Pass+s.Fail != 2 {
 		t.Fatalf("in-window completed: pass=%d fail=%d", s.Pass, s.Fail)
+	}
+}
+
+func TestRecentOnly(t *testing.T) {
+	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	at := func(h int) time.Time { return base.Add(time.Duration(h) * time.Hour) }
+	paths := []runPath{
+		{ID: "1", Updated: at(0)},
+		{ID: "2", Updated: at(170)},
+		{ID: "3", Updated: at(200)},
+	}
+
+	// A 24h window with a 12h grace keeps the newest run and the one inside the
+	// grace band, and drops the run from a week earlier.
+	got := recentOnly(paths, 24*time.Hour)
+	if len(got) != 2 || got[0].ID != "2" || got[1].ID != "3" {
+		t.Fatalf("pruned to %+v", got)
+	}
+
+	// No window and an all-zero layout both leave the list untouched.
+	if n := len(recentOnly(paths, 0)); n != 3 {
+		t.Fatalf("window 0 pruned to %d", n)
+	}
+	unstyled := []runPath{{ID: "1"}, {ID: "2"}}
+	if n := len(recentOnly(unstyled, time.Hour)); n != 2 {
+		t.Fatalf("zero timestamps pruned to %d", n)
+	}
+
+	// An entry with no timestamp survives next to timestamped ones.
+	mixed := append([]runPath{{ID: "old", Updated: at(0)}}, runPath{ID: "periodic"}, runPath{ID: "new", Updated: at(200)})
+	kept := recentOnly(mixed, time.Hour)
+	if len(kept) != 2 || kept[0].ID != "periodic" || kept[1].ID != "new" {
+		t.Fatalf("mixed = %+v", kept)
+	}
+}
+
+func TestCollectWindowPrunesFetch(t *testing.T) {
+	// Thirty index entries a day apart; a 48h window must not fetch the other
+	// finished.json objects.
+	objects := map[string]string{}
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 30; i++ {
+		id := strconv.Itoa(1000 + i)
+		run := "gs://bkt/pr-logs/pull/o_r/1/job/" + id
+		objects["pr-logs/directory/job/"+id+".txt"] = run
+		objects["pr-logs/pull/o_r/1/job/"+id+"/finished.json"] = `{"result":"SUCCESS"}`
+	}
+	c := fakeClientAt(t, objects, nil, func(name string) time.Time {
+		for i := 0; i < 30; i++ {
+			if id := strconv.Itoa(1000 + i); strings.HasSuffix(name, "/"+id+".txt") {
+				return base.Add(time.Duration(i) * 24 * time.Hour)
+			}
+		}
+		return time.Time{}
+	})
+
+	s, err := Collect(context.Background(), c, "bkt", "job", 48*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The last run plus the two inside the grace band.
+	if s.Runs != 3 {
+		t.Fatalf("runs = %d, want 3", s.Runs)
+	}
+	if s.Pass != 3 {
+		t.Fatalf("pass = %d", s.Pass)
 	}
 }
 

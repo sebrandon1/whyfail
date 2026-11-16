@@ -128,7 +128,8 @@ Prow keeps a public, per-job run index in its results bucket:
 `whyfail` reads those, so it works for any repo with Prow jobs — including ones
 Sippy does not track (for example `rh-ecosystem-edge/*`). Aborted runs are
 reported separately and excluded from the pass rate, and every card prints the
-retention window it actually used.
+retention window it actually used. `--window` bounds the fetch as well as the
+arithmetic, and the run count on a card describes the same window as its rate.
 
 Verdicts: `BROKEN` (never passes in the window), `FLAKY` (<85% or a recent
 drop), `DEGRADED` (85–95%), `HEALTHY` (≥95%), `UNKNOWN` (<5 runs).
