@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -282,5 +283,47 @@ func TestResolveStepLogJobWithoutLog(t *testing.T) {
 	_, _, err := resolveStepLog(context.Background(), gcstest.Client(t, d), gcstest.Bucket, "other", "job")
 	if err == nil || !strings.Contains(err.Error(), `no build-log.txt found for step "job"`) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestListArtifacts(t *testing.T) {
+	const prefix = "run/artifacts/"
+	d := &gcstest.Dataset{Objects: map[string][]byte{}}
+	for i := 0; i < 250; i++ {
+		name := prefix + fmt.Sprintf("obj-%03d", i)
+		d.Objects[name] = []byte("x")
+		d.Listing = append(d.Listing, gcstest.Item{Name: name, Size: "1"})
+	}
+	c := gcstest.Client(t, d)
+
+	// The default asks for one extra so it can tell it is truncating.
+	objs, truncated, err := listArtifacts(context.Background(), c, gcstest.Bucket, prefix, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) != 200 || !truncated {
+		t.Fatalf("len=%d truncated=%v", len(objs), truncated)
+	}
+
+	// Unlimited reproduces the old whole-listing behaviour.
+	objs, truncated, err = listArtifacts(context.Background(), c, gcstest.Bucket, prefix, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) != 250 || truncated {
+		t.Fatalf("len=%d truncated=%v", len(objs), truncated)
+	}
+
+	// A prefix with fewer objects than the limit is not truncated.
+	small := &gcstest.Dataset{
+		Objects: map[string][]byte{"p/a": []byte("x")},
+		Listing: []gcstest.Item{{Name: "p/a", Size: "1"}},
+	}
+	objs, truncated, err = listArtifacts(context.Background(), gcstest.Client(t, small), gcstest.Bucket, "p/", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) != 1 || truncated {
+		t.Fatalf("small: len=%d truncated=%v", len(objs), truncated)
 	}
 }

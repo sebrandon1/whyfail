@@ -393,6 +393,7 @@ func noStepLog(step string) error {
 
 func newArtifactCmd(g *globals) *cobra.Command {
 	var list bool
+	var limit int
 	cmd := &cobra.Command{
 		Use:   "artifact <gcs-url | gs://bucket/object>",
 		Short: "Metadata and a bounded excerpt for a GCS artifact",
@@ -407,7 +408,7 @@ func newArtifactCmd(g *globals) *cobra.Command {
 			start := time.Now()
 
 			if list || strings.HasSuffix(object, "/") {
-				objs, err := c.List(ctx, bucket, object)
+				objs, truncated, err := listArtifacts(ctx, c, bucket, object, limit)
 				if err != nil {
 					return err
 				}
@@ -420,8 +421,16 @@ func newArtifactCmd(g *globals) *cobra.Command {
 						st.Dim(term.PadLeft(render.FormatBytes(o.Size), 9)),
 						term.TruncMiddle(o.Name, st.Width()-14))
 				}
-				fmt.Fprintf(&buf, "  %s\n", st.Dim(fmt.Sprintf("%d objects, %s total",
-					len(objs), render.FormatBytes(total))))
+				if truncated {
+					// ListLimit reads one page, so the true total is unknown and
+					// "at least" is the honest wording.
+					fmt.Fprintf(&buf, "  %s\n", st.Dim(fmt.Sprintf(
+						"%d of at least %d objects, %s shown · use --limit 0 for all",
+						len(objs), len(objs)+1, render.FormatBytes(total))))
+				} else {
+					fmt.Fprintf(&buf, "  %s\n", st.Dim(fmt.Sprintf("%d objects, %s total",
+						len(objs), render.FormatBytes(total))))
+				}
 				g.emit(&buf, stats.Record{Cmd: "artifact-list", Target: object, InventoryBytes: total}, c, start)
 				return nil
 			}
@@ -481,7 +490,26 @@ func newArtifactCmd(g *globals) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&list, "list", false, "list a prefix instead of reading an object")
+	cmd.Flags().IntVar(&limit, "limit", 200, "maximum objects to list; 0 = all")
 	return cmd
+}
+
+// listArtifacts returns at most limit objects under prefix. It asks for one
+// extra so a complete listing is distinguishable from a truncated one, which
+// ListLimit alone cannot report; limit 0 means every object.
+func listArtifacts(ctx context.Context, c *gcs.Client, bucket, prefix string, limit int) ([]gcs.Object, bool, error) {
+	if limit <= 0 {
+		objs, err := c.List(ctx, bucket, prefix)
+		return objs, false, err
+	}
+	objs, err := c.ListLimit(ctx, bucket, prefix, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(objs) > limit {
+		return objs[:limit], true, nil
+	}
+	return objs, false, nil
 }
 
 func isText(b []byte) bool {
