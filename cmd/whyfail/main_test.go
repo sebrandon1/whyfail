@@ -11,8 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"encoding/json"
+	"github.com/sebrandon1/whyfail/internal/api"
+	"github.com/sebrandon1/whyfail/internal/enrich"
 	"github.com/sebrandon1/whyfail/internal/gcstest"
+	"github.com/sebrandon1/whyfail/internal/health"
 	"github.com/sebrandon1/whyfail/internal/run"
+	"github.com/sebrandon1/whyfail/internal/stats"
 	"github.com/sebrandon1/whyfail/internal/term"
 )
 
@@ -347,6 +352,48 @@ func TestParseByteSize(t *testing.T) {
 		}
 		if err != nil || got != c.want {
 			t.Errorf("parseByteSize(%q) = %d, %v; want %d", c.in, got, err, c.want)
+		}
+	}
+}
+
+// TestJSONSchemas pins the contract a consumer sees: every --json document
+// carries the schema key first, and the top-level fields do not silently
+// disappear.
+func TestJSONSchemas(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  any
+		keys []string
+	}{
+		{"run", &run.Digest{Schema: api.SchemaV1}, nil},
+		{"job", &health.Summary{Schema: api.SchemaV1}, []string{"job", "runs", "pass_rate", "verdict"}},
+		{"failures", failuresOut{Schema: api.SchemaV1}, []string{"run"}},
+		{"log", logOut{Schema: api.SchemaV1}, []string{"artifact", "lines", "text"}},
+		{"artifact", artifactOut{Schema: api.SchemaV1},
+			[]string{"object", "size", "content_type", "updated", "excerpt", "truncated"}},
+		{"search", &enrich.SearchResult{Schema: api.SchemaV1}, []string{"query", "matches"}},
+		{"gain", stats.Summarize(nil, "", time.Time{}), []string{"since", "until", "totals"}},
+		{"pr", prOut{Schema: api.SchemaV1}, []string{"pr", "title", "sha", "failing"}},
+	}
+	for _, c := range cases {
+		b, err := json.Marshal(c.doc)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !strings.HasPrefix(string(b), `{"schema":"`+api.SchemaV1+`"`) {
+			t.Errorf("%s: schema is not the first key: %s", c.name, b[:min(len(b), 60)])
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if m["schema"] != api.SchemaV1 {
+			t.Errorf("%s: schema = %v", c.name, m["schema"])
+		}
+		for _, k := range c.keys {
+			if _, ok := m[k]; !ok {
+				t.Errorf("%s: missing top-level %q", c.name, k)
+			}
 		}
 	}
 }
