@@ -179,3 +179,61 @@ func TestEscapePath(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestGetRetriesTransientFailure(t *testing.T) {
+	var calls int
+	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls < 3 {
+			return respond(503, "busy"), nil
+		}
+		return respond(200, "payload"), nil
+	})
+
+	data, err := c.Get(context.Background(), "bkt", "obj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "payload" || calls != 3 {
+		t.Fatalf("data=%q calls=%d", data, calls)
+	}
+	// The bytes of a discarded attempt must not be counted.
+	if c.NetworkBytes != int64(len("payload")) {
+		t.Fatalf("network bytes = %d, want %d", c.NetworkBytes, len("payload"))
+	}
+}
+
+func TestGetHonoursRetryLimit(t *testing.T) {
+	var calls int
+	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		return respond(503, "busy"), nil
+	})
+	c.Retries = 1
+
+	if _, err := c.Get(context.Background(), "bkt", "obj"); err == nil {
+		t.Fatal("expected an error after the retries ran out")
+	}
+	if calls != 2 {
+		t.Fatalf("made %d requests, want 2", calls)
+	}
+}
+
+func TestListRetriesTransientFailure(t *testing.T) {
+	var calls int
+	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls < 2 {
+			return respond(429, "slow down"), nil
+		}
+		return respond(200, `{"items":[{"name":"a","size":"10","updated":"u"}]}`), nil
+	})
+
+	objs, err := c.List(context.Background(), "bkt", "pre/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) != 1 || calls != 2 {
+		t.Fatalf("objects=%d calls=%d", len(objs), calls)
+	}
+}

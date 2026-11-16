@@ -62,6 +62,7 @@ Global flags apply to every command:
 | `--bucket <name>` | GCS bucket used for job history |
 | `--bytes-per-token <n>` | bytes-per-token estimate used by `gain` |
 | `--baseline <dur>` | modelled manual time per call used by `gain` |
+| `--retries <n>` | retry transient HTTP failures (429, 5xx) `n` times (default 2) |
 | `--color auto\|always\|never` | colourise human output (default `auto`: only on a TTY) |
 | `--width <n>` | output width in columns (default `$COLUMNS`, else 100) |
 

@@ -42,10 +42,11 @@ type globals struct {
 	bucket        string
 	colorMode     string
 	width         int
+	retries       int
 }
 
 func main() {
-	g := &globals{bytesPerToken: 4, baseline: 10 * time.Minute, colorMode: "auto"}
+	g := &globals{bytesPerToken: 4, baseline: 10 * time.Minute, colorMode: "auto", retries: 2}
 	root := &cobra.Command{
 		Use:           "whyfail",
 		Short:         "Prow CI context for humans and Claude Code",
@@ -63,6 +64,7 @@ func main() {
 	root.PersistentFlags().DurationVar(&g.baseline, "baseline", 10*time.Minute, "modelled manual time per call for gain")
 	root.PersistentFlags().StringVar(&g.colorMode, "color", "auto", "colourise human output: auto, always or never")
 	root.PersistentFlags().IntVar(&g.width, "width", 0, "output width in columns (default: $COLUMNS or 100)")
+	root.PersistentFlags().IntVar(&g.retries, "retries", 2, "retry transient HTTP failures (429, 5xx) this many times")
 
 	root.AddCommand(
 		newRunCmd(g), newJobCmd(g), newFailuresCmd(g), newLogCmd(g), newArtifactCmd(g),
@@ -87,6 +89,7 @@ func newClient(g *globals) *gcs.Client {
 	}
 	c := gcs.New(dir)
 	c.Refresh = g.refresh
+	c.Retries = g.retries
 	return c
 }
 

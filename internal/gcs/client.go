@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/sebrandon1/whyfail/internal/httpx"
 )
 
 // ErrNotFound is returned when an object does not exist (e.g. a pruned run).
@@ -42,6 +44,9 @@ type Client struct {
 	HTTP     *http.Client
 	CacheDir string
 	Refresh  bool
+	// Retries is how many times a transient failure is retried, so a command
+	// makes at most Retries+1 attempts per request.
+	Retries int
 
 	// NetworkBytes counts decompressed bytes downloaded from GCS.
 	NetworkBytes int64
@@ -56,6 +61,7 @@ type Client struct {
 func New(cacheDir string) *Client {
 	return &Client{
 		CacheDir: cacheDir,
+		Retries:  2,
 		HTTP: &http.Client{
 			Timeout: 90 * time.Second,
 			Transport: &http.Transport{
@@ -91,7 +97,7 @@ func (c *Client) fetchPage(ctx context.Context, bucket string, q url.Values) (pa
 		return pageResult{}, err
 	}
 	req.Header.Set("User-Agent", UserAgent)
-	resp, err := c.HTTP.Do(req)
+	resp, err := httpx.Do(c.HTTP, req, c.Retries)
 	if err != nil {
 		return pageResult{}, err
 	}
@@ -177,7 +183,7 @@ func (c *Client) Stat(ctx context.Context, bucket, object string) (Object, error
 		return Object{}, err
 	}
 	req.Header.Set("User-Agent", UserAgent)
-	resp, err := c.HTTP.Do(req)
+	resp, err := httpx.Do(c.HTTP, req, c.Retries)
 	if err != nil {
 		return Object{}, err
 	}
@@ -263,7 +269,7 @@ func (c *Client) fetch(ctx context.Context, bucket, object string, limit int64) 
 	}
 	req.Header.Set("User-Agent", UserAgent)
 
-	resp, err := c.HTTP.Do(req)
+	resp, err := httpx.Do(c.HTTP, req, c.Retries)
 	if err != nil {
 		return nil, fmt.Errorf("get %s: %w", object, err)
 	}
