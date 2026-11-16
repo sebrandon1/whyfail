@@ -203,6 +203,11 @@ make test-live  # real network: four digests (3 recert + cert-manager), health, 
 make fixtures   # re-record both testdata corpora from live Prow
 ```
 
+Every push to `main` and every pull request runs `gofmt`, `go vet`,
+`golangci-lint`, `go test ./...` and `make build` in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml). `make test-live` stays
+manual — it reads the real Prow bucket.
+
 `testdata/` holds public artifacts recorded by `scripts/fetch-fixtures.sh`:
 three failing runs from
 [rh-ecosystem-edge/recert#2364](https://github.com/rh-ecosystem-edge/recert/pull/2364)
