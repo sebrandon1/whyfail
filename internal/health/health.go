@@ -23,6 +23,13 @@ var ErrJobNotFound = errors.New("job not found")
 // busy presubmit is a few hundred runs, and the bucket rate-limits.
 const fanOut = 16
 
+// pruneGrace is how much older than the window an index entry may be and still
+// be fetched. The index `updated` field is when the run was recorded, while the
+// window is applied to the finished timestamp, so a long job that started just
+// before the cutoff can still finish inside it. 12h covers the 8h timeouts
+// these jobs use, plus queueing.
+const pruneGrace = 12 * time.Hour
+
 // RunResult is one historical run of a job.
 type RunResult struct {
 	ID     string    `json:"id"`
@@ -73,6 +80,9 @@ func Collect(ctx context.Context, c *gcs.Client, bucket, job string, window time
 	if err != nil {
 		return nil, err
 	}
+	// A window that only narrows the arithmetic still pays for every run's
+	// finished.json. Drop the entries that cannot land inside it first.
+	paths = recentOnly(paths, window)
 
 	// Each goroutine writes its own slot, so the results are ordered by run
 	// rather than by completion.
@@ -106,6 +116,35 @@ type runPath struct {
 	ID      string
 	Path    string
 	Updated time.Time
+}
+
+// recentOnly drops index entries that cannot fall inside the window, so a
+// windowed lookup does not fetch finished.json for runs it will discard. The
+// reference point is the newest entry, matching summarize, and entries without
+// a timestamp are kept: some layouts do not report one, and dropping them would
+// silently empty the summary.
+func recentOnly(paths []runPath, window time.Duration) []runPath {
+	if window <= 0 || len(paths) == 0 {
+		return paths
+	}
+	var newest time.Time
+	for _, p := range paths {
+		if p.Updated.After(newest) {
+			newest = p.Updated
+		}
+	}
+	if newest.IsZero() {
+		return paths
+	}
+	cutoff := newest.Add(-window - pruneGrace)
+	out := paths[:0]
+	for _, p := range paths {
+		if !p.Updated.IsZero() && p.Updated.Before(cutoff) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func enumerate(ctx context.Context, c *gcs.Client, bucket, job string) ([]runPath, error) {
@@ -197,10 +236,12 @@ func summarize(job string, results []RunResult, window time.Duration) *Summary {
 	var completed []RunResult
 	prs := map[string]struct{}{}
 	for _, r := range results {
-		s.Runs++
 		if !cutoff.IsZero() && r.Time.Before(cutoff) {
 			continue
 		}
+		// Runs counts the runs the rate is computed over, so a windowed card
+		// does not quote a total from outside its own window.
+		s.Runs++
 		switch r.Result {
 		case "SUCCESS":
 			s.Pass++
