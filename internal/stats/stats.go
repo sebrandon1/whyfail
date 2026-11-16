@@ -197,6 +197,11 @@ func Summarize(recs []Record, by string, since time.Time) Aggregate {
 			if by == "repo" {
 				key = r.Repo
 			}
+			if key == "" {
+				// A periodic run or a `doctor` call has no repository. Say so
+				// rather than rendering a blank row.
+				key = "(unknown)"
+			}
 			t := a.Groups[key]
 			t.Add(r)
 			a.Groups[key] = t
