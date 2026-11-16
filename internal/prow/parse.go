@@ -59,8 +59,21 @@ func ParseRef(raw string) (Ref, error) {
 	return Ref{}, fmt.Errorf("not a Prow run reference: %q", raw)
 }
 
+// stripNestedScheme drops a gs:// that appears inside an object path. It comes
+// from shell interpolation such as gs://$BUCKET/$PATH where the path already is
+// a gs:// URL, or from pasting a gs:// URL into a Prow view URL's /view/gs/
+// slot. The inner reference is the one meant, and no object path can contain a
+// scheme of its own, so returning what follows it is unambiguous.
+func stripNestedScheme(s string) string {
+	i := strings.Index(s, "gs://")
+	if i < 0 {
+		return s
+	}
+	return s[i+len("gs://"):]
+}
+
 func refFromBare(s string) (Ref, error) {
-	s = strings.Trim(s, "/")
+	s = stripNestedScheme(strings.Trim(s, "/"))
 	bucket, path, ok := strings.Cut(s, "/")
 	if !ok || bucket == "" || path == "" {
 		return Ref{}, fmt.Errorf("want <bucket>/<path>, got %q", s)
@@ -92,7 +105,7 @@ func ViewURL(ref Ref) string {
 func ParseArtifactURL(raw string) (bucket, object string, err error) {
 	raw = strings.TrimSpace(raw)
 	if strings.HasPrefix(raw, "gs://") {
-		s := strings.TrimPrefix(raw, "gs://")
+		s := stripNestedScheme(strings.TrimPrefix(raw, "gs://"))
 		b, o, ok := strings.Cut(s, "/")
 		if !ok {
 			return "", "", fmt.Errorf("want gs://<bucket>/<object>, got %q", raw)

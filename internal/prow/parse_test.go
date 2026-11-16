@@ -25,6 +25,16 @@ func TestParseRef(t *testing.T) {
 			in:     "gs://bucket/logs/periodic-job/99",
 			bucket: "bucket", path: "logs/periodic-job/99", job: "periodic-job", run: "99", ok: true,
 		},
+		// A gs:// URL interpolated into another gs:// prefix, and the same
+		// slip pasted into a Prow view URL: both resolve to the inner ref.
+		{
+			in:     "gs://bucket/gs://bucket/logs/periodic-job/99",
+			bucket: "bucket", path: "logs/periodic-job/99", job: "periodic-job", run: "99", ok: true,
+		},
+		{
+			in:     "https://prow.ci.openshift.org/view/gs/gs://bucket/logs/periodic-job/99",
+			bucket: "bucket", path: "logs/periodic-job/99", job: "periodic-job", run: "99", ok: true,
+		},
 		{in: "https://github.com/openshift/release/pull/1", ok: false},
 		{in: "gs://onlybucket", ok: false},
 		{in: "", ok: false},
@@ -58,6 +68,9 @@ func TestParseArtifactURL(t *testing.T) {
 	}{
 		{"https://storage.googleapis.com/test-platform-results-public/pr-logs/x/1/build-log.txt", "test-platform-results-public", "pr-logs/x/1/build-log.txt", true},
 		{"gs://bucket/a/b.txt", "bucket", "a/b.txt", true},
+		// Interpolating a full gs:// URL into another gs:// prefix is a common
+		// shell slip; the inner reference is the one meant.
+		{"gs://bucket/gs://bucket/a/b.txt", "bucket", "a/b.txt", true},
 		{"https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/b/o/x.txt", "b", "o/x.txt", true},
 		{"https://storage.googleapis.com/onlybucket", "", "", false},
 		{"https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/other", "", "", false},
