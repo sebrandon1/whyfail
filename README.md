@@ -1,300 +1,79 @@
 # whyfail
 
+[![CI](https://github.com/sebrandon1/whyfail/actions/workflows/ci.yml/badge.svg)](https://github.com/sebrandon1/whyfail/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/sebrandon1/whyfail)](https://github.com/sebrandon1/whyfail/blob/main/go.mod)
+[![License](https://img.shields.io/github/license/sebrandon1/whyfail)](LICENSE)
+
 Prow CI context for humans and Claude Code.
 
-`whyfail` answers the two questions that actually come up when OpenShift CI goes
-red:
+`whyfail` answers the two questions that actually come up when OpenShift CI goes red:
+**is this job broken or flaky?** — from Prow's own retained run history, across every
+PR that uses the job — and **what is in this run?** — a compact digest of the failing
+step or test, the error, and the infrastructure signals, instead of megabytes of GCS
+artifacts. No authentication, no LLM, no automatic retests.
 
-1. **Is this job broken or flaky?** — computed from Prow's own retained run
-   history, across every PR that uses the job.
-2. **What is in this run?** — a compact digest of the failing step or test, the
-   error, and the infrastructure signals, instead of megabytes of GCS artifacts.
+## Features
 
-No authentication, no LLM, no automatic retests.
+- **Job verdicts** — `BROKEN`, `FLAKY`, `DEGRADED`, `HEALTHY` over a printed retention
+  window, with pass rate, last pass, and how many PRs the job is failing for
+- **Run digests** — the failing step or blocking test, a bounded error excerpt, cloud
+  lease and install signals, and a `NEXT` recommendation
+- **PR triage** — every failing check on the head commit, Prow and GitHub, each with
+  its job health, so "this PR broke it" is distinguishable from "this job is red"
+- **Bounded reads** — `log` and `artifact` return an excerpt, never a multi-megabyte file
+- **`--json` everywhere** — one `whyfail/v1` document per reporting command
+- **Claude Code integration** — hooks, slash commands, a skill, and an MCP server
 
 ## Install
 
 ```sh
+go install github.com/sebrandon1/whyfail/cmd/whyfail@latest
+
+# or from a checkout
 make build          # ./bin/whyfail
 make install        # ~/go/bin/whyfail
 whyfail init        # Claude Code integration (plugin, hooks, skill)
 ```
 
-Requires Go 1.27+ (matching `go.mod`). The `pr` command additionally needs the `gh`
-CLI, and `init` needs the `claude` CLI unless you pass `--hooks-only`.
+Requires Go 1.27+ (matching `go.mod`). The `pr` command needs the `gh` CLI, and
+`init` needs the `claude` CLI unless you pass `--hooks-only`.
 
-## Use
+## Quick start
 
 ```sh
-# Is the job itself healthy? (fastest, most useful)
-whyfail job pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial
-
-# What happened in one run?
-whyfail run <prow-url>
-
-# Every failing check on a PR — Prow statuses and GitHub check runs
-whyfail pr https://github.com/rh-ecosystem-edge/recert/pull/2364
-
-# Failed tests and steps only
-whyfail failures <prow-url>
-
-# Bounded log / artifact access
+whyfail job pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow   # broken or flaky?
+whyfail run <prow-url>          # what happened in one run?
+whyfail pr <github-pr-url>      # every failing check, with job health
+whyfail failures <prow-url>     # failed tests and steps only
 whyfail log <prow-url> <step> --tail 80
-whyfail artifact <gcs-url>
-
-# How often has this error been seen elsewhere?
-whyfail search 'Platform Prometheus targets should not be accessible'
+whyfail artifact <gcs-url>      # metadata and excerpt
+whyfail search '<regex>'        # how often has this error been seen?
 ```
 
-Every command accepts `--json` except `doctor`, which always prints its
-checklist as text. Every document carries `"schema": "whyfail/v1"` as its first
-key — see [JSON](#json).
+## Guides
 
-### Flags
-
-Global flags apply to every command:
-
-| Flag | Meaning |
+| Guide | Contents |
 |---|---|
-| `--json` | structured output instead of human text |
-| `--no-stats` | do not record this invocation in `stats.jsonl` |
-| `--cache-dir <dir>` | object-cache location (default: the user cache dir) |
-| `--refresh` | ignore cached listings and objects |
-| `--window <dur>` | history window, e.g. `720h`; `0` = all retained runs |
-| `--bucket <name>` | GCS bucket used for job history |
-| `--bytes-per-token <n>` | bytes-per-token estimate used by `gain` |
-| `--baseline <dur>` | modelled manual time per call used by `gain` |
-| `--retries <n>` | retry transient HTTP failures (429, 5xx) `n` times (default 2) |
-| `--cache-max <size>` | object-cache limit, e.g. `512MB` or `2GB`; `0` disables pruning (default 512MB) |
-| `--color auto\|always\|never` | colourise human output (default `auto`: only on a TTY) |
-| `--width <n>` | output width in columns (default `$COLUMNS`, else 100) |
-
-Command-specific flags:
-
-- `run` — `--no-history` (skip the job-health lookup), `--search` (look up the top
-  failure signature on search.ci), `--no-sippy` (skip the Sippy coverage probe)
-- `log` — `--tail <n>` (trailing lines, default 120)
-- `artifact` — `--list` (list a prefix instead of reading an object), `--limit <n>`
-  (maximum objects to list, default 200; `0` = all)
-- `search` — `--max-age <dur>` (search window, default `48h`)
-- `gain` — `--history` (recent calls), `--fun` (the less serious statistics),
-  `--since <dur>`, `--by cmd|repo` (aliases: `stats`, `saved`)
-- `init` — `--hooks-only` (write the hooks into `settings.json` instead of using the
-  plugin system), `--mcp` (also register the MCP server), `--project` (install for the
-  current repository instead of the user), `--from <owner/repo|url|path>` (marketplace
-  source, default `sebrandon1/whyfail`), `--dry-run`, `--uninstall`, `-y/--yes`
-
-### Cache
-
-Fetched objects are cached under `--cache-dir`; listings never are. The cache is
-pruned at most once a day, oldest object first, until it is under `--cache-max` —
-and never down to objects written in the last hour, so a running command cannot
-lose a file it just wrote. `--refresh` neither reads nor prunes the cache, so
-evidence of a bad cache survives. `whyfail doctor` prints the current size and
-object count.
-
-### Environment
-
-- `WHYFAIL_CACHE_DIR` — relocates both the object cache and `stats.jsonl`
-- `WHYFAIL_NO_STATS` — set to anything to disable statistics recording
-- `NO_COLOR` / `CLICOLOR=0` / `TERM=dumb` — disable colour, as `--color never` does
-
-### Output
-
-Human output is one card with a fixed 9-character label gutter, colour-coded
-verdicts, and everything folded to the terminal width; `--json` stays structured.
-Every human path uses the same gutter — `run`, `job`, `failures`, `pr`, `gain`,
-`gain --history`, `search`, `artifact` and `doctor` — so `--width` and `--color`
-apply uniformly:
-
-```
-pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename
-⚠ FLAKY     63.8% pass · 154 runs since 2026-09-17 · last pass 2026-11-12
-
-  RUN       2120987667142283264   FAILURE   2h13m   28% of 8h00m timeout
-  PR        rh-ecosystem-edge/recert#2364   sebrandon1
-            "CNF-30065: add integration scenarios for cluster customizations…"
-  CLUSTER   build10 · ci · /test baremetalds-sno-recert-cluster-rename
-  REASON    executing_graph:step_failed:utilizing_lease:executing_test:executing_…
-
-  ────────────────────────────────────────────────────────────────────────
-  STEPS     13 total · 3 failed
-  ✗  baremetalds-sno-recert-cluster-rename    1h51m
-  ✗  baremetalds-sno-test                    12m11s
-       no JUnit report to /tmp/artifacts/reports/e2e-monitor-tests__…xml
-  ✗  gather-audit-logs                           2s
-       error getting cluster version: tls: failed to verify certificate…
-       … (2 more lines in --json)
-
-  TESTS     50 pass · 0 fail · 0 skip   [extension]
-  MONITORS  76 failures · 8 causes
-   51×  monitor: kubelet-container-restarts
-   13×  monitor: required-scc-annotation-checker
-
-  NEXT      a retest is reasonable
-```
-
-Paths are shortened from the middle so the filename survives, and long errors are
-cut to two lines — `--json` and `whyfail log` carry the rest.
-
-## JSON
-
-Every `--json` document is one named shape whose first key is
-`"schema": "whyfail/v1"`, so a consumer can assert one thing across all commands
-(`whyfail <cmd> --json | jq -e '.schema == "whyfail/v1"'`). Fields are additive:
-a name is never reused for something else.
-
-| Command | Top-level keys |
-|---|---|
-| `run` | `schema`, `run`, `tests`, `infra`, `artifacts`, `job`, `next_action`, … (the `whyfail/v1` digest) |
-| `job` | `schema`, `job`, `from`, `to`, `runs`, `pass`, `fail`, `abort`, `missing`, `pass_rate`, `verdict`, `samples`, … |
-| `failures` | `schema`, `run`, `tests`, `failed_steps` |
-| `log` | `schema`, `artifact`, `lines`, `text` |
-| `artifact` | `schema`, `object`, `size`, `content_type`, `updated`, `excerpt`, `truncated` |
-| `search` | `schema`, `query`, `matches`, `jobs`, `known_bug` |
-| `gain` | `schema`, `since`, `until`, `totals`, `groups`, `top_saves`, `verdicts` |
-| `pr` | `schema`, `pr`, `title`, `sha`, `failing[]` — each card is `check`, `job`, `prow`, `health` |
-| `init` | `schema`, `scope`, `mode`, `dry_run`, `from`, `settings`, `steps[]`, `ok` |
-
-A `pr` card's `health` is `null` when there is no Prow job behind the check
-(`prow: false`) or when the job is not in the bucket; neither case is reported as
-healthy. `run` nests failed steps under `run.steps.failed`, while `failures`
-lists them at `failed_steps` — both names are part of v1.
-
-## How the health numbers are computed
-
-Prow keeps a public, per-job run index in its results bucket:
-
-- presubmits: `pr-logs/directory/<job>/<run-id>.txt` (one tiny file per run)
-- periodics: `logs/<job>/<run-id>/`
-- each run's `finished.json` is ~450 bytes and says `SUCCESS`, `FAILURE`, or `ABORTED`
-
-`whyfail` reads those, so it works for any repo with Prow jobs — including ones
-Sippy does not track (for example `rh-ecosystem-edge/*`). Aborted runs are
-reported separately and excluded from the pass rate, and every card prints the
-retention window it actually used. `--window` bounds the fetch as well as the
-arithmetic, and the run count on a card describes the same window as its rate.
-
-Verdicts: `BROKEN` (never passes in the window), `FLAKY` (<85% or a recent
-drop), `DEGRADED` (85–95%), `HEALTHY` (≥95%), `UNKNOWN` (<5 runs).
-
-## Run digests
-
-The digest uses structured sources first:
-
-- `prowjob.json` — PR, author, title, base SHA, rerun command, timeout
-- `artifacts/ci-operator-step-graph.json` — per-step durations and failures
-- `artifacts/ci-operator-metrics.json` — cloud lease, quota slice, machines,
-  cluster profile, ci-operator completion
-- `extension_test_result_*.json` — per-test `lifecycle` (blocking/informing),
-  result, duration and error (far better than parsing multi-megabyte JUnit)
-- JUnit files — `junit_e2e__*.xml`, `junit_install.xml`, and a bare `junit.xml`,
-  used when a job emits no extension result JSON. Pass/fail/skip counts are derived
-  from the `<testcase>`/`<failure>`/`<error>`/`<skipped>` elements, and `<error>` is
-  treated like `<failure>`
-- `e2e-monitor-tests` — monitor failures, grouped into causes
-- `sippy=tracked` / `not tracked` — whether Sippy has coverage for the job at all
-
-Monitor failures are collapsed by cause, so “76 failures” becomes “8 causes” with
-the dominant one first.
-
-## Claude Code integration
-
-`plugin/` is a Claude Code plugin that installs a `PreToolUse` hook and a skill:
-
-- a bare `curl` or `wget` of a single Prow run URL is rewritten to
-  `whyfail run <url>`
-- a bare `curl` or `wget` of a GCS artifact URL is rewritten to
-  `whyfail artifact <url>`
-- a `search.ci.openshift.org` or `search.dptools.openshift.org` URL is rewritten to
-  `whyfail search '<query>'`
-- `WebFetch` on those hosts is denied with the equivalent whyfail command
-- the `prow-ci` skill tells Claude to check job health before run detail
-
-Only a single-URL fetch with no pipe, redirection, or extra argument is rewritten;
-anything more complex is left untouched.
-
-One command installs it:
-
-```sh
-whyfail init                       # plugin via the claude CLI (marketplace + install)
-whyfail init --hooks-only          # no plugin system: settings.json, commands and skill
-whyfail init --mcp                 # also register the MCP server
-whyfail init --dry-run             # print the steps and change nothing
-whyfail init --uninstall           # reverse whatever init did
-```
-
-The plugin path is the default because the plugin manager owns updates and
-enable/disable. `--hooks-only` exists for anyone who would rather not use the plugin
-system: it appends the same two `PreToolUse` entries to `settings.json` — leaving every
-other key and hook untouched — and copies the commands and skill into `~/.claude`. It
-refuses when the plugin is already enabled, so the hooks never run twice. Both paths
-need `whyfail` on `PATH`, because the hooks execute it directly.
-
-`whyfail doctor` reports which of these is in place — plugin enabled, plugin disabled,
-hooks-only, or not installed — by reading `settings.json`, so it stays offline.
-
-### MCP server
-
-`whyfail mcp` is a stdio MCP server exposing two tools, `prow_run` (a run digest) and
-`prow_job` (health over retained history). Register it with `whyfail init --mcp`, or by
-hand:
-
-```sh
-claude mcp add whyfail -s user -- whyfail mcp
-```
-
-It is independent of the hook: the hook rewrites `Bash` and `WebFetch`, while the MCP
-server gives Claude typed tools. Both can be installed together.
-
-## Savings
-
-Every invocation is recorded locally (`~/.cache/whyfail/stats.jsonl`). The file is
-rotated to `stats.jsonl.1` at 5 MB, and `gain` reads both, so totals span the last
-two generations rather than resetting:
-
-```sh
-whyfail gain
-whyfail gain --history
-whyfail gain --by repo --since 7d
-```
-
-It reports bytes read versus emitted, what came from the cache versus the
-network, which job verdicts you spent your calls on, how far you are from the
-next round milestone, and — under `--fun` — the most expensive single
-investigation, what a blind retest would have won, and the hour you triage
-most. Measured numbers are separated from modelled ones (prefixed `~`). Disable with `--no-stats` or
-`WHYFAIL_NO_STATS=1`.
+| [CLI reference](docs/cli-reference.md) | Every command, flag, environment variable, output format and cache rule |
+| [JSON output](docs/json-output.md) | The `whyfail/v1` schema, per-command keys, health semantics |
+| [Job health](docs/job-health.md) | Where pass rates come from and what each verdict means |
+| [Run digests](docs/run-digests.md) | The structured artifacts a digest reads, and why it is bounded |
+| [Claude Code integration](docs/claude-code.md) | Hooks, slash commands, the `prow-ci` skill, `init`, and the MCP server |
+| [Savings](docs/savings.md) | How `gain` measures bytes and models time, and how to disable stats |
+| [Development](docs/development.md) | Build targets, CI gates, and the recorded Prow fixtures |
 
 ## Limitations
 
 - History covers Prow's GCS retention (roughly 60–90 days), not all time.
 - Public data only; private/embargoed repositories are out of scope.
-- Sippy is used only when it has coverage; for many repos the correct answer is
-  `not tracked`.
+- Sippy is used only when it has coverage; for many repos the answer is `not tracked`.
 - The `pr` command depends on the GitHub API through `gh`.
 
 ## Development
 
-```sh
-make test       # hermetic: unit tests + recorded Prow fixtures
-make lint
-make test-live  # real network: four digests (3 recert + cert-manager), health, and savings
-make fixtures   # re-record both testdata corpora from live Prow
-```
+`make test` is hermetic (unit tests plus recorded Prow fixtures); `make lint` and
+`make build` cover the rest. Every push and pull request runs `gofmt`, `go vet`,
+`golangci-lint`, a `go mod tidy` diff gate, `go test ./...` and `make build`. See
+[Development](docs/development.md) for the fixture corpus and the live tests.
 
-Every push to `main` and every pull request runs `gofmt`, `go vet`,
-`golangci-lint`, `go test ./...` and `make build` in
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml). `make test-live` stays
-manual — it reads the real Prow bucket.
-
-`testdata/` holds public artifacts recorded by `scripts/fetch-fixtures.sh`:
-three failing runs from
-[rh-ecosystem-edge/recert#2364](https://github.com/rh-ecosystem-edge/recert/pull/2364)
-(extension-JSON test results, `sippy=not tracked`) and one from
-[openshift/cert-manager-operator#533](https://github.com/openshift/cert-manager-operator/pull/533)
-(a bare `artifacts/junit.xml`, `sippy=tracked`). Bodies are stored exactly as GCS stores
-them, so the sizes in `listing.json.gz` and the on-disk sizes agree and
-`Artifacts.TotalBytes` stays truthful. The hermetic tests serve them through
-`internal/gcstest`; the `live` build tag runs the same assertions against the
-real bucket, so Prow layout changes surface as a failure naming the run.
+Licensed under Apache-2.0; see [LICENSE](LICENSE).
