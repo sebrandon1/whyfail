@@ -159,7 +159,7 @@ func TestBuildAssemblesDigest(t *testing.T) {
 	if d.Job.Health == nil {
 		t.Fatal("expected health even with no indexed runs")
 	}
-	if !strings.Contains(d.NextAction, "blocking test failed") {
+	if !strings.Contains(d.NextAction, `blocking test "blocker" failed`) {
 		t.Fatalf("next: %q", d.NextAction)
 	}
 }
