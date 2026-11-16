@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sebrandon1/whyfail/internal/api"
 	"github.com/sebrandon1/whyfail/internal/gcs"
 	"github.com/sebrandon1/whyfail/internal/health"
 	"github.com/sebrandon1/whyfail/internal/prow"
@@ -200,7 +201,7 @@ func Build(ctx context.Context, c *gcs.Client, ref prow.Ref, opts Options) (*Dig
 	}
 	base := ref.ObjectPath + "/"
 
-	d := &Digest{Schema: "whyfail/v1"}
+	d := &Digest{Schema: api.SchemaV1}
 	run := &RunInfo{ID: ref.RunID, JobName: ref.Job, URL: prow.ViewURL(ref)}
 	d.Run = run
 

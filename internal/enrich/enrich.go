@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sebrandon1/whyfail/internal/api"
 	"github.com/sebrandon1/whyfail/internal/httpx"
 )
 
@@ -25,6 +26,7 @@ const (
 
 // SearchResult summarizes how often a signature appears elsewhere.
 type SearchResult struct {
+	Schema   string   `json:"schema"`
 	Query    string   `json:"query"`
 	Matches  int      `json:"matches"`
 	Jobs     []string `json:"jobs,omitempty"`
@@ -68,7 +70,7 @@ func SearchCI(ctx context.Context, hc *http.Client, query, maxAge string) (*Sear
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("search.ci: decode: %w", err)
 	}
-	res := &SearchResult{Query: query}
+	res := &SearchResult{Schema: api.SchemaV1, Query: query}
 	for job, tests := range raw {
 		res.Jobs = append(res.Jobs, job)
 		for _, matches := range tests {

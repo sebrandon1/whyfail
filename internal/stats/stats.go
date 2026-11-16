@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/sebrandon1/whyfail/internal/api"
 )
 
 // Record is one invocation.
@@ -171,6 +173,7 @@ func (t *Totals) Add(r Record) {
 
 // Aggregate is the result of `whyfail gain`.
 type Aggregate struct {
+	Schema string            `json:"schema"`
 	Since  time.Time         `json:"since"`
 	Until  time.Time         `json:"until"`
 	Totals Totals            `json:"totals"`
@@ -180,7 +183,7 @@ type Aggregate struct {
 
 // Summarize sums records newer than since. by may be "cmd", "repo" or empty.
 func Summarize(recs []Record, by string, since time.Time) Aggregate {
-	a := Aggregate{Groups: map[string]Totals{}}
+	a := Aggregate{Schema: api.SchemaV1, Groups: map[string]Totals{}}
 	for _, r := range recs {
 		if !since.IsZero() && r.TS.Before(since) {
 			continue

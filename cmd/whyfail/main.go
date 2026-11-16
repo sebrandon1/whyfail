@@ -19,6 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sebrandon1/whyfail/internal/api"
 	"github.com/sebrandon1/whyfail/internal/enrich"
 	"github.com/sebrandon1/whyfail/internal/gcs"
 	"github.com/sebrandon1/whyfail/internal/health"
@@ -166,6 +167,40 @@ func (g *globals) emit(buf *bytes.Buffer, rec stats.Record, c *gcs.Client, start
 	_ = stats.Append(rec)
 }
 
+// The --json shapes. Every document carries the schema key first so a consumer
+// can assert one thing across all commands; field names are stable and additive.
+type failuresOut struct {
+	Schema string        `json:"schema"`
+	Run    *run.RunInfo  `json:"run"`
+	Tests  *run.Tests    `json:"tests,omitempty"`
+	Failed []run.StepRef `json:"failed_steps,omitempty"`
+}
+
+type logOut struct {
+	Schema   string `json:"schema"`
+	Artifact string `json:"artifact"`
+	Lines    int    `json:"lines"`
+	Text     string `json:"text"`
+}
+
+type artifactOut struct {
+	Schema      string `json:"schema"`
+	Object      string `json:"object"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type"`
+	Updated     string `json:"updated"`
+	Excerpt     string `json:"excerpt"`
+	Truncated   bool   `json:"truncated"`
+}
+
+type prOut struct {
+	Schema  string          `json:"schema"`
+	PR      string          `json:"pr"`
+	Title   string          `json:"title"`
+	SHA     string          `json:"sha"`
+	Failing []render.PRCard `json:"failing"`
+}
+
 func writeJSON(buf *bytes.Buffer, v any) {
 	enc := json.NewEncoder(buf)
 	enc.SetIndent("", "  ")
@@ -308,11 +343,7 @@ func newFailuresCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out := struct {
-				Run    *run.RunInfo  `json:"run"`
-				Tests  *run.Tests    `json:"tests,omitempty"`
-				Failed []run.StepRef `json:"failed_steps,omitempty"`
-			}{Run: d.Run, Tests: d.Tests, Failed: d.Run.Steps.Failed}
+			out := failuresOut{Schema: api.SchemaV1, Run: d.Run, Tests: d.Tests, Failed: d.Run.Steps.Failed}
 
 			var buf bytes.Buffer
 			if g.jsonOut {
@@ -365,7 +396,7 @@ func newLogCmd(g *globals) *cobra.Command {
 
 			var buf bytes.Buffer
 			if g.jsonOut {
-				writeJSON(&buf, map[string]any{"artifact": target, "lines": len(lines), "text": out})
+				writeJSON(&buf, logOut{Schema: api.SchemaV1, Artifact: target, Lines: len(lines), Text: out})
 			} else {
 				buf.WriteString(out)
 			}
@@ -490,12 +521,6 @@ func newArtifactCmd(g *globals) *cobra.Command {
 			}
 
 			var buf bytes.Buffer
-			metaOut := map[string]any{
-				"object":       object,
-				"size":         meta.Size,
-				"content_type": meta.ContentType,
-				"updated":      meta.Updated,
-			}
 			if g.jsonOut {
 				excerpt := string(data)
 				if isLog {
@@ -505,9 +530,15 @@ func newArtifactCmd(g *globals) *cobra.Command {
 					}
 					excerpt = strings.Join(lines, "\n")
 				}
-				metaOut["excerpt"] = excerpt
-				metaOut["truncated"] = meta.Size > int64(len(data))
-				writeJSON(&buf, metaOut)
+				writeJSON(&buf, artifactOut{
+					Schema:      api.SchemaV1,
+					Object:      object,
+					Size:        meta.Size,
+					ContentType: meta.ContentType,
+					Updated:     meta.Updated,
+					Excerpt:     excerpt,
+					Truncated:   meta.Size > int64(len(data)),
+				})
 			} else {
 				render.Artifact(&buf, g.style(), render.ArtifactInfo{
 					Name:        object,
@@ -794,7 +825,7 @@ func newPRCmd(g *globals) *cobra.Command {
 
 			var buf bytes.Buffer
 			if g.jsonOut {
-				writeJSON(&buf, map[string]any{"pr": args[0], "title": title, "sha": sha, "failing": cards})
+				writeJSON(&buf, prOut{Schema: api.SchemaV1, PR: args[0], Title: title, SHA: sha, Failing: cards})
 			} else {
 				render.PR(&buf, g.style(), org, repo, num, title, cards)
 			}

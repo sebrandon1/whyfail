@@ -45,8 +45,9 @@ whyfail artifact <gcs-url>
 whyfail search 'Platform Prometheus targets should not be accessible'
 ```
 
-Every command accepts `--json` (`whyfail/v1` for runs) except `doctor`, which always
-prints its checklist as text.
+Every command accepts `--json` except `doctor`, which always prints its
+checklist as text. Every document carries `"schema": "whyfail/v1"` as its first
+key — see [JSON](#json).
 
 ### Flags
 
@@ -130,6 +131,29 @@ pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename
 
 Paths are shortened from the middle so the filename survives, and long errors are
 cut to two lines — `--json` and `whyfail log` carry the rest.
+
+## JSON
+
+Every `--json` document is one named shape whose first key is
+`"schema": "whyfail/v1"`, so a consumer can assert one thing across all commands
+(`whyfail <cmd> --json | jq -e '.schema == "whyfail/v1"'`). Fields are additive:
+a name is never reused for something else.
+
+| Command | Top-level keys |
+|---|---|
+| `run` | `schema`, `run`, `tests`, `infra`, `artifacts`, `job`, `next_action`, … (the `whyfail/v1` digest) |
+| `job` | `schema`, `job`, `from`, `to`, `runs`, `pass`, `fail`, `abort`, `missing`, `pass_rate`, `verdict`, `samples`, … |
+| `failures` | `schema`, `run`, `tests`, `failed_steps` |
+| `log` | `schema`, `artifact`, `lines`, `text` |
+| `artifact` | `schema`, `object`, `size`, `content_type`, `updated`, `excerpt`, `truncated` |
+| `search` | `schema`, `query`, `matches`, `jobs`, `known_bug` |
+| `gain` | `schema`, `since`, `until`, `totals`, `groups`, `top_saves` |
+| `pr` | `schema`, `pr`, `title`, `sha`, `failing[]` — each card is `check`, `job`, `prow`, `health` |
+
+A `pr` card's `health` is `null` when there is no Prow job behind the check
+(`prow: false`) or when the job is not in the bucket; neither case is reported as
+healthy. `run` nests failed steps under `run.steps.failed`, while `failures`
+lists them at `failed_steps` — both names are part of v1.
 
 ## How the health numbers are computed
 

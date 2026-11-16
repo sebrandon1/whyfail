@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sebrandon1/whyfail/internal/api"
 	"github.com/sebrandon1/whyfail/internal/gcs"
 	"github.com/sebrandon1/whyfail/internal/parallel"
 )
@@ -56,6 +57,7 @@ func (v Verdict) IsBad() bool {
 
 // Summary describes a job's history over the retained window.
 type Summary struct {
+	Schema         string      `json:"schema"`
 	Job            string      `json:"job"`
 	From           time.Time   `json:"from"`
 	To             time.Time   `json:"to"`
@@ -220,7 +222,7 @@ func enumerate(ctx context.Context, c *gcs.Client, bucket, job string) ([]runPat
 }
 
 func summarize(job string, results []RunResult, window time.Duration) *Summary {
-	s := &Summary{Job: job, Samples: results}
+	s := &Summary{Schema: api.SchemaV1, Job: job, Samples: results}
 	if len(results) == 0 {
 		s.Verdict = VerdictUnknown
 		return s
