@@ -753,7 +753,7 @@ func History(w io.Writer, st term.Style, recs []stats.Record) {
 	fmt.Fprintln(w, header)
 	for _, r := range recs {
 		line := fmt.Sprintf("  %s %s %s",
-			st.Dim(r.TS.Local().Format("2006-01-02 15:04")),
+			st.Dim(r.TS.Format("2006-01-02 15:04")),
 			term.PadRight(term.Trunc(r.Cmd, cmdW), cmdW),
 			term.PadLeft(fmt.Sprintf("%s → %s", FormatBytes(r.ReadBytes), FormatBytes(r.EmittedBytes)), bytesW))
 		if showTarget {
