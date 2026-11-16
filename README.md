@@ -31,7 +31,7 @@ whyfail job pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert
 # What happened in one run?
 whyfail run <prow-url>
 
-# Every failing check on a PR, with job health
+# Every failing check on a PR — Prow statuses and GitHub check runs
 whyfail pr https://github.com/rh-ecosystem-edge/recert/pull/2364
 
 # Failed tests and steps only

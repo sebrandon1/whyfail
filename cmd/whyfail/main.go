@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -686,42 +687,10 @@ func newPRCmd(g *globals) *cobra.Command {
 				return fmt.Errorf("could not read head SHA for %s", args[0])
 			}
 
-			checks, err := ghGet("repos/" + org + "/" + repo + "/commits/" + sha + "/statuses?per_page=100")
+			cards, err := collectPRChecks(ctx, execGH, c, g.bucket, org, repo, base, sha, g.window)
 			if err != nil {
 				return err
 			}
-			var statuses []struct {
-				Context string `json:"context"`
-				State   string `json:"state"`
-			}
-			if err := json.Unmarshal(checks, &statuses); err != nil {
-				return err
-			}
-
-			var cards []prCard
-			seen := map[string]bool{}
-			for _, s := range statuses {
-				// Statuses are returned newest first; keep the latest per context.
-				if seen[s.Context] {
-					continue
-				}
-				seen[s.Context] = true
-				if s.State != "failure" && s.State != "error" {
-					continue
-				}
-				test := strings.TrimPrefix(s.Context, "ci/prow/")
-				if test == s.Context || test == "" {
-					continue
-				}
-				job := "pull-ci-" + org + "-" + repo + "-" + base + "-" + test
-				cards = append(cards, prCard{Check: s.Context, Job: job})
-			}
-			// Each Collect already fans out internally, so keep the outer width
-			// small. A failed lookup leaves a nil summary, which the renderer
-			// reports as an unknown job rather than a healthy one.
-			parallel.Do(len(cards), prFanOut, func(i int) {
-				cards[i].Health, _ = health.Collect(ctx, c, g.bucket, cards[i].Job, g.window)
-			})
 
 			var buf bytes.Buffer
 			if g.jsonOut {
@@ -730,7 +699,7 @@ func newPRCmd(g *globals) *cobra.Command {
 				st := g.style()
 				fmt.Fprintf(&buf, "%s/%s%s  %s\n\n", org, repo, st.Cyan("#"+num), title)
 				if len(cards) == 0 {
-					fmt.Fprintln(&buf, "no failing Prow checks on the head commit")
+					fmt.Fprintln(&buf, "no failing checks on the head commit")
 				}
 				jobW := st.Width() - 44
 				if jobW < 24 {
@@ -756,20 +725,168 @@ func newPRCmd(g *globals) *cobra.Command {
 	}
 }
 
-// prCard is one failing check on a PR head commit. Health is nil when the job
-// could not be looked up at all — usually a base-branch rename, which makes the
-// synthesised job name wrong.
+// prCard is one failing check on a PR head commit. Prow is false for a check
+// that has no Prow job to look up at all — a GitHub Actions job, say. Health is
+// nil when the job could not be looked up, usually a base-branch rename, which
+// makes the synthesised job name wrong.
 type prCard struct {
 	Check  string          `json:"check"`
-	Job    string          `json:"job"`
+	Job    string          `json:"job,omitempty"`
+	Prow   bool            `json:"prow"`
 	Health *health.Summary `json:"health"`
 }
 
-// prCardLine renders one check. A nil Health is reported as an unknown job
-// rather than dereferenced or silently treated as healthy.
+// commitStatus is one entry from the legacy commit-status API, which Prow uses.
+type commitStatus struct {
+	Context string `json:"context"`
+	State   string `json:"state"`
+}
+
+// checkRun is one entry from the Checks API, which GitHub Actions uses.
+type checkRun struct {
+	Name       string  `json:"name"`
+	Status     string  `json:"status"`
+	Conclusion *string `json:"conclusion"`
+}
+
+// checkRunsPage is the Checks API envelope. Unlike the statuses endpoint, which
+// returns a bare array, this returns an object wrapping the runs.
+type checkRunsPage struct {
+	CheckRuns []checkRun `json:"check_runs"`
+}
+
+// failingCheckRun reports whether a completed check run failed. A check that is
+// still running has a null conclusion and is not a failure yet.
+func failingCheckRun(r checkRun) bool {
+	if r.Status != "completed" || r.Conclusion == nil {
+		return false
+	}
+	switch *r.Conclusion {
+	case "failure", "timed_out", "cancelled", "action_required", "startup_failure":
+		return true
+	}
+	return false
+}
+
+// collectPRChecks reads every failing check on a head commit. Prow reports
+// through the legacy commit-status API and Actions through the Checks API, so
+// both are needed: reading statuses alone hides every Actions failure, and the
+// command then claims the PR has none.
+func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org, repo, branch, sha string, window time.Duration) ([]prCard, error) {
+	base := "repos/" + org + "/" + repo + "/commits/" + sha
+
+	statusRaw, err := api(base+"/statuses?per_page=100", true)
+	if err != nil {
+		return nil, err
+	}
+	statuses, err := decodePages[commitStatus](statusRaw)
+	if err != nil {
+		return nil, fmt.Errorf("decode commit statuses: %w", err)
+	}
+	runsRaw, err := api(base+"/check-runs?per_page=100&filter=latest", true)
+	if err != nil {
+		return nil, err
+	}
+	runs, err := decodeCheckRunPages(runsRaw)
+	if err != nil {
+		return nil, fmt.Errorf("decode check runs: %w", err)
+	}
+
+	var cards []prCard
+	seen := map[string]bool{}
+	// Statuses first: the API returns the newest entry per context first, and
+	// Prow's names are the ones job-name synthesis understands.
+	for _, s := range statuses {
+		if seen[s.Context] {
+			continue
+		}
+		seen[s.Context] = true
+		if s.State != "failure" && s.State != "error" {
+			continue
+		}
+		test := strings.TrimPrefix(s.Context, "ci/prow/")
+		if test == s.Context || test == "" {
+			// A failing check with no Prow job behind it: report it rather than
+			// dropping it, which is what made an all-Actions PR look clean.
+			cards = append(cards, prCard{Check: s.Context})
+			continue
+		}
+		cards = append(cards, prCard{
+			Check: s.Context,
+			Job:   "pull-ci-" + org + "-" + repo + "-" + branch + "-" + test,
+			Prow:  true,
+		})
+	}
+	for _, r := range runs {
+		if seen[r.Name] || !failingCheckRun(r) {
+			continue
+		}
+		seen[r.Name] = true
+		cards = append(cards, prCard{Check: r.Name})
+	}
+
+	// Each Collect already fans out internally, so keep the outer width small.
+	// Only Prow checks have a job to look up.
+	parallel.Do(len(cards), prFanOut, func(i int) {
+		if !cards[i].Prow {
+			return
+		}
+		cards[i].Health, _ = health.Collect(ctx, c, bucket, cards[i].Job, window)
+	})
+	return cards, nil
+}
+
+// decodePages decodes one or more concatenated JSON arrays. `gh api --paginate`
+// writes each page as a separate array with no separator between them, so a
+// single Unmarshal would fail on the second page.
+func decodePages[T any](b []byte) ([]T, error) {
+	var out []T
+	dec := json.NewDecoder(bytes.NewReader(b))
+	for {
+		var page []T
+		err := dec.Decode(&page)
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+	}
+}
+
+// decodeCheckRunPages decodes the concatenated envelopes `gh api --paginate`
+// writes for the Checks API.
+func decodeCheckRunPages(b []byte) ([]checkRun, error) {
+	var out []checkRun
+	dec := json.NewDecoder(bytes.NewReader(b))
+	for {
+		var page checkRunsPage
+		err := dec.Decode(&page)
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page.CheckRuns...)
+	}
+}
+
+// prCardLine renders one check. A nil Health is reported as an unknown Prow job
+// or as a check with no Prow job behind it, never as healthy.
 func prCardLine(st term.Style, cd prCard, jobW int) string {
-	name := term.PadRight(term.TruncMiddle(cd.Job, jobW), jobW)
+	name := cd.Job
+	if name == "" {
+		name = cd.Check
+	}
+	name = term.PadRight(term.TruncMiddle(name, jobW), jobW)
 	if cd.Health == nil {
+		if !cd.Prow {
+			return fmt.Sprintf("  %s %s %s\n", name,
+				st.Red(term.PadRight("✗ FAILED", 11)),
+				st.Dim("no Prow job for this check"))
+		}
 		return fmt.Sprintf("  %s %s %s\n", name,
 			st.Dim(term.PadRight("? UNKNOWN", 11)),
 			st.Dim("no history in this bucket"))
@@ -781,13 +898,26 @@ func prCardLine(st term.Style, cd prCard, jobW int) string {
 		st.Dim(health.FormatRate(cd.Health.PassRate)), cd.Health.Runs)
 }
 
-func ghGet(endpoint string) ([]byte, error) {
-	out, err := exec.Command("gh", "api", endpoint).Output()
+// ghAPI is one `gh api` request. paginate follows the Link header and returns
+// every page's JSON array concatenated, which is what the checks endpoints need.
+type ghAPI func(endpoint string, paginate bool) ([]byte, error)
+
+// execGH runs `gh api`. Its signature satisfies ghAPI, so callers that want to
+// be testable take a ghAPI and tests pass a canned one.
+func execGH(endpoint string, paginate bool) ([]byte, error) {
+	args := []string{"api"}
+	if paginate {
+		args = append(args, "--paginate")
+	}
+	args = append(args, endpoint)
+	out, err := exec.Command("gh", args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh api %s: %w", endpoint, err)
 	}
 	return out, nil
 }
+
+func ghGet(endpoint string) ([]byte, error) { return execGH(endpoint, false) }
 
 func ghJSON(endpoint string) (map[string]any, error) {
 	out, err := ghGet(endpoint)
