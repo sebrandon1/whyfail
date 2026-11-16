@@ -45,6 +45,8 @@ type globals struct {
 	colorMode     string
 	width         int
 	retries       int
+	cacheMax      string
+	cacheMaxBytes int64
 }
 
 func main() {
@@ -67,6 +69,15 @@ func main() {
 	root.PersistentFlags().StringVar(&g.colorMode, "color", "auto", "colourise human output: auto, always or never")
 	root.PersistentFlags().IntVar(&g.width, "width", 0, "output width in columns (default: $COLUMNS or 100)")
 	root.PersistentFlags().IntVar(&g.retries, "retries", 2, "retry transient HTTP failures (429, 5xx) this many times")
+	root.PersistentFlags().StringVar(&g.cacheMax, "cache-max", "512MB", "object cache size limit (e.g. 512MB, 2GB); 0 disables pruning")
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		n, err := parseByteSize(g.cacheMax)
+		if err != nil {
+			return fmt.Errorf("--cache-max: %w", err)
+		}
+		g.cacheMaxBytes = n
+		return nil
+	}
 
 	root.AddCommand(
 		newRunCmd(g), newJobCmd(g), newFailuresCmd(g), newLogCmd(g), newArtifactCmd(g),
@@ -92,7 +103,48 @@ func newClient(g *globals) *gcs.Client {
 	c := gcs.New(dir)
 	c.Refresh = g.refresh
 	c.Retries = g.retries
+	pruneCache(c, g.cacheMaxBytes)
 	return c
+}
+
+// pruneCache keeps the object cache bounded. It runs at most once a day, never
+// under --refresh (a user debugging a bad cache must keep the evidence), and
+// never fails the command.
+func pruneCache(c *gcs.Client, maxBytes int64) {
+	if maxBytes <= 0 || c.Refresh {
+		return
+	}
+	stamp := filepath.Join(c.CacheDir, "last-prune")
+	if fi, err := os.Stat(stamp); err == nil && time.Since(fi.ModTime()) < 24*time.Hour {
+		return
+	}
+	_, _, _ = c.Prune(maxBytes, time.Hour)
+	_ = os.MkdirAll(c.CacheDir, 0o755)
+	_ = os.WriteFile(stamp, nil, 0o644)
+}
+
+// parseByteSize accepts 512MB, 2GB, 100KB or a plain byte count.
+func parseByteSize(s string) (int64, error) {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	if s == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	mult := int64(1)
+	for _, u := range []struct {
+		suffix string
+		mult   int64
+	}{{"GB", 1 << 30}, {"MB", 1 << 20}, {"KB", 1 << 10}, {"B", 1}} {
+		if strings.HasSuffix(s, u.suffix) {
+			mult = u.mult
+			s = strings.TrimSuffix(s, u.suffix)
+			break
+		}
+	}
+	n, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid size %q", s)
+	}
+	return int64(n * float64(mult)), nil
 }
 
 // emit writes the rendered output and records one stats entry.
@@ -609,7 +661,8 @@ func newDoctorCmd(g *globals) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient(g)
 			st := g.style()
-			doctorLocal(os.Stdout, st, c.CacheDir)
+			cacheBytes, cacheFiles, _ := c.CacheSize()
+			doctorLocal(os.Stdout, st, c.CacheDir, cacheBytes, cacheFiles)
 
 			// The probes write as they finish rather than buffering the card, so
 			// a slow endpoint cannot leave the terminal blank.
@@ -651,9 +704,13 @@ func doctorLine(w io.Writer, st term.Style, label, value string) {
 // writer so the report can be tested without a live bucket. Nothing here is
 // recorded in stats: doctor reads no artifacts, so counting it would inflate
 // `gain` with calls that saved nothing.
-func doctorLocal(w io.Writer, st term.Style, cacheDir string) {
+func doctorLocal(w io.Writer, st term.Style, cacheDir string, cacheBytes int64, cacheFiles int) {
 	doctorLine(w, st, "version", version)
-	doctorLine(w, st, "cache", cacheDir)
+	cacheValue := cacheDir
+	if cacheFiles > 0 {
+		cacheValue = fmt.Sprintf("%s (%s, %d objects)", cacheDir, render.FormatBytes(cacheBytes), cacheFiles)
+	}
+	doctorLine(w, st, "cache", cacheValue)
 	doctorLine(w, st, "stats", fmt.Sprintf("%s (enabled=%v)", stats.Path(), stats.Enabled()))
 	doctorLine(w, st, "binary", binaryStatus())
 	doctorLine(w, st, "gh", ghStatus())
