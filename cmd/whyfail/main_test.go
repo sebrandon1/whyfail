@@ -290,9 +290,9 @@ func TestListArtifacts(t *testing.T) {
 
 func TestDoctorLocal(t *testing.T) {
 	var buf bytes.Buffer
-	doctorLocal(&buf, term.Config(new(bytes.Buffer), "never", 100), "/tmp/cache")
+	doctorLocal(&buf, term.Config(new(bytes.Buffer), "never", 100), "/tmp/cache", 1<<20, 7)
 	out := buf.String()
-	for _, want := range []string{"version:", "cache:     /tmp/cache", "stats:", "binary:", "gh:"} {
+	for _, want := range []string{"version:", "/tmp/cache (1.0 MB, 7 objects)", "stats:", "binary:", "gh:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -318,5 +318,35 @@ func TestSameFile(t *testing.T) {
 	}
 	if sameFile(real, other) {
 		t.Error("different files compared equal")
+	}
+}
+
+func TestParseByteSize(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int64
+		bad  bool
+	}{
+		{"512MB", 512 << 20, false},
+		{"2GB", 2 << 30, false},
+		{"100KB", 100 << 10, false},
+		{"4096", 4096, false},
+		{"0", 0, false},
+		{" 1mb ", 1 << 20, false},
+		{"", 0, true},
+		{"lots", 0, true},
+		{"-5MB", 0, true},
+	}
+	for _, c := range cases {
+		got, err := parseByteSize(c.in)
+		if c.bad {
+			if err == nil {
+				t.Errorf("parseByteSize(%q) = %d, want an error", c.in, got)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("parseByteSize(%q) = %d, %v; want %d", c.in, got, err, c.want)
+		}
 	}
 }

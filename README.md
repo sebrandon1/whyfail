@@ -63,6 +63,7 @@ Global flags apply to every command:
 | `--bytes-per-token <n>` | bytes-per-token estimate used by `gain` |
 | `--baseline <dur>` | modelled manual time per call used by `gain` |
 | `--retries <n>` | retry transient HTTP failures (429, 5xx) `n` times (default 2) |
+| `--cache-max <size>` | object-cache limit, e.g. `512MB` or `2GB`; `0` disables pruning (default 512MB) |
 | `--color auto\|always\|never` | colourise human output (default `auto`: only on a TTY) |
 | `--width <n>` | output width in columns (default `$COLUMNS`, else 100) |
 
@@ -76,6 +77,15 @@ Command-specific flags:
 - `search` — `--max-age <dur>` (search window, default `48h`)
 - `gain` — `--history` (recent calls), `--since <dur>`, `--by cmd|repo`
   (aliases: `stats`, `saved`)
+
+### Cache
+
+Fetched objects are cached under `--cache-dir`; listings never are. The cache is
+pruned at most once a day, oldest object first, until it is under `--cache-max` —
+and never down to objects written in the last hour, so a running command cannot
+lose a file it just wrote. `--refresh` neither reads nor prunes the cache, so
+evidence of a bad cache survives. `whyfail doctor` prints the current size and
+object count.
 
 ### Environment
 
