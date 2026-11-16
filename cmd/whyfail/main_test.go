@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sebrandon1/whyfail/internal/gcstest"
 	"github.com/sebrandon1/whyfail/internal/health"
 	"github.com/sebrandon1/whyfail/internal/run"
 	"github.com/sebrandon1/whyfail/internal/term"
@@ -126,5 +129,89 @@ func TestPRCardLine(t *testing.T) {
 	long := prCardLine(st, prCard{Job: strings.Repeat("x", 200)}, 40)
 	if n := term.Visible(strings.SplitN(long, "\n", 2)[0]); n > st.Width() {
 		t.Errorf("line is %d columns wide: %q", n, long)
+	}
+}
+
+// logDataset builds a small run tree shaped like Prow's real artifact layout.
+func logDataset(t *testing.T) (*gcstest.Dataset, string) {
+	t.Helper()
+	const run = "pr-logs/pull/org_repo/1/job/42"
+	files := map[string]string{
+		run + "/build-log.txt":                                  "job log",
+		run + "/artifacts/release/build-log.txt":                "release log",
+		run + "/artifacts/aws-e2e/provision/build-log.txt":      "provision log",
+		run + "/artifacts/aws-e2e/gather/build-log.txt":         "gather log",
+		run + "/artifacts/aws-e2e/artifacts/deep/build-log.txt": "deep log",
+		run + "/artifacts/build-logs/src-amd64.log":             "build log, not a step",
+	}
+	d := &gcstest.Dataset{Objects: map[string][]byte{}}
+	for name, body := range files {
+		d.Objects[name] = []byte(body)
+		d.Listing = append(d.Listing, gcstest.Item{Name: name})
+	}
+	// GCS returns a listing in lexical order; the fallback scan depends on it.
+	sort.Slice(d.Listing, func(i, j int) bool { return d.Listing[i].Name < d.Listing[j].Name })
+	return d, run
+}
+
+// countRequests counts the requests recorded exactly as want, so the narrow
+// artifacts listing is not mistaken for a full-run listing.
+func countRequests(reqs []string, want string) int {
+	n := 0
+	for _, r := range reqs {
+		if r == want {
+			n++
+		}
+	}
+	return n
+}
+
+func TestResolveStepLog(t *testing.T) {
+	cases := []struct {
+		name     string
+		step     string
+		want     string
+		wantErr  string
+		wantList int // full-run listings; the whole point is that this stays 0
+	}{
+		{name: "job pseudo-step", step: "job", want: "job log"},
+		{name: "direct child of artifacts", step: "release", want: "release log"},
+		{name: "under the test directory", step: "provision", want: "provision log"},
+		{name: "nested deeper, last-resort scan", step: "deep", want: "deep log", wantList: 1},
+		{name: "unknown step", step: "nope", wantErr: `no build-log.txt found for step "nope"`, wantList: 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d, run := logDataset(t)
+			client := gcstest.Client(t, d)
+
+			target, data, err := resolveStepLog(context.Background(), client, gcstest.Bucket, run, c.step)
+			if c.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+					t.Fatalf("err = %v, want %q", err, c.wantErr)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(data) != c.want {
+					t.Errorf("data = %q, want %q", data, c.want)
+				}
+				if !strings.HasPrefix(target, run+"/") {
+					t.Errorf("target = %q, want a path inside the run", target)
+				}
+			}
+			if got := countRequests(d.Requests(), "list "+run+"/"); got != c.wantList {
+				t.Errorf("full-run listings = %d, want %d (requests: %v)", got, c.wantList, d.Requests())
+			}
+		})
+	}
+}
+
+func TestResolveStepLogJobWithoutLog(t *testing.T) {
+	d := &gcstest.Dataset{Objects: map[string][]byte{"other/x": []byte("x")}, Listing: []gcstest.Item{{Name: "other/x"}}}
+	_, _, err := resolveStepLog(context.Background(), gcstest.Client(t, d), gcstest.Bucket, "other", "job")
+	if err == nil || !strings.Contains(err.Error(), `no build-log.txt found for step "job"`) {
+		t.Fatalf("err = %v", err)
 	}
 }

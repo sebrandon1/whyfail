@@ -290,26 +290,7 @@ func newLogCmd(g *globals) *cobra.Command {
 			c := newClient(g)
 			start := time.Now()
 
-			objs, err := c.List(ctx, ref.Bucket, ref.ObjectPath+"/")
-			if err != nil {
-				return err
-			}
-			target := ""
-			for _, o := range objs {
-				switch {
-				case step == "job" && o.Name == ref.ObjectPath+"/build-log.txt":
-					target = o.Name
-				case step != "job" && strings.Contains(o.Name, "/"+step+"/build-log.txt"):
-					target = o.Name
-				}
-				if target != "" {
-					break
-				}
-			}
-			if target == "" {
-				return fmt.Errorf("no build-log.txt found for step %q", step)
-			}
-			data, err := c.GetLimit(ctx, ref.Bucket, target, 8<<20)
+			target, data, err := resolveStepLog(ctx, c, ref.Bucket, ref.ObjectPath, step)
 			if err != nil {
 				return err
 			}
@@ -331,6 +312,71 @@ func newLogCmd(g *globals) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&tail, "tail", 120, "number of trailing lines")
 	return cmd
+}
+
+// maxLogBytes caps how much of a build log is read, so a huge log cannot fill
+// memory for the sake of a 120-line tail.
+const maxLogBytes = 8 << 20
+
+// resolveStepLog reads a step's build log and returns the object it came from.
+// It fetches the paths Prow actually writes before it considers listing the
+// run, because a full listing of a large job is tens of megabytes of metadata
+// for one small object:
+//
+//	<run>/artifacts/<step>/build-log.txt            ci-operator steps
+//	<run>/artifacts/<test-name>/<step>/build-log.txt  most step logs
+//
+// The whole-run scan is kept as a last resort for layouts that nest deeper.
+func resolveStepLog(ctx context.Context, c *gcs.Client, bucket, runPath, step string) (string, []byte, error) {
+	if step == "job" {
+		if name, data, err := getLog(ctx, c, bucket, runPath+"/build-log.txt"); !errors.Is(err, gcs.ErrNotFound) {
+			return name, data, err
+		}
+		return "", nil, noStepLog(step)
+	}
+
+	if name, data, err := getLog(ctx, c, bucket, runPath+"/artifacts/"+step+"/build-log.txt"); !errors.Is(err, gcs.ErrNotFound) {
+		return name, data, err
+	}
+
+	// One level deeper, under the operator test's own directory.
+	dirs, err := c.ListDirs(ctx, bucket, runPath+"/artifacts/")
+	if err != nil {
+		return "", nil, err
+	}
+	for _, dir := range dirs {
+		name, data, perr := getLog(ctx, c, bucket, dir+step+"/build-log.txt")
+		if errors.Is(perr, gcs.ErrNotFound) {
+			continue
+		}
+		return name, data, perr
+	}
+
+	objs, err := c.List(ctx, bucket, runPath+"/")
+	if err != nil {
+		return "", nil, err
+	}
+	for _, o := range objs {
+		if strings.Contains(o.Name, "/"+step+"/build-log.txt") {
+			return getLog(ctx, c, bucket, o.Name)
+		}
+	}
+	return "", nil, noStepLog(step)
+}
+
+// getLog fetches one candidate path, passing ErrNotFound through so the caller
+// can try the next layout. Logs are one-shot and large, so they are never
+// cached.
+func getLog(ctx context.Context, c *gcs.Client, bucket, name string) (string, []byte, error) {
+	data, err := c.GetLimit(ctx, bucket, name, maxLogBytes)
+	if err != nil {
+		return "", nil, err
+	}
+	return name, data, nil
+}
+
+func noStepLog(step string) error {
+	return fmt.Errorf("no build-log.txt found for step %q", step)
 }
 
 // ---------- artifact ----------
