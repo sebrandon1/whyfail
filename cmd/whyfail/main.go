@@ -938,12 +938,14 @@ func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org,
 	}
 
 	// Each Collect already fans out internally, so keep the outer width small.
-	// Only Prow checks have a job to look up.
-	parallel.Do(len(cards), prFanOut, func(i int) {
+	// Only Prow checks have a job to look up. A lane's panic is reported by Do
+	// but does not fail the command: one check's health is optional.
+	_ = parallel.Do(len(cards), prFanOut, func(i int) error {
 		if !cards[i].Prow {
-			return
+			return nil
 		}
 		cards[i].Health, _ = health.Collect(ctx, c, bucket, cards[i].Job, window)
+		return nil
 	})
 	return cards, nil
 }

@@ -89,7 +89,7 @@ func Collect(ctx context.Context, c *gcs.Client, bucket, job string, window time
 	// Each goroutine writes its own slot, so the results are ordered by run
 	// rather than by completion.
 	results := make([]RunResult, len(paths))
-	parallel.Do(len(paths), fanOut, func(i int) {
+	err = parallel.Do(len(paths), fanOut, func(i int) error {
 		p := paths[i]
 		rr := RunResult{ID: p.ID, Path: p.Path, Time: p.Updated}
 		data, err := c.Get(ctx, bucket, p.Path+"/finished.json")
@@ -109,7 +109,11 @@ func Collect(ctx context.Context, c *gcs.Client, bucket, job string, window time
 			rr.Result = "MISSING"
 		}
 		results[i] = rr
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	return summarize(job, results, window), nil
 }
@@ -177,16 +181,20 @@ func enumerate(ctx context.Context, c *gcs.Client, bucket, job string) ([]runPat
 	}
 
 	paths := make([]string, len(entries))
-	parallel.Do(len(entries), fanOut, func(i int) {
+	err = parallel.Do(len(entries), fanOut, func(i int) error {
 		data, err := c.Get(ctx, bucket, entries[i].name)
 		if err != nil {
-			return
+			return nil
 		}
 		p := strings.TrimSpace(string(data))
 		p = strings.TrimPrefix(p, "gs://"+bucket+"/")
 		p = strings.TrimPrefix(p, "gs://")
 		paths[i] = p
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	out := make([]runPath, 0, len(entries))
 	for i, e := range entries {
