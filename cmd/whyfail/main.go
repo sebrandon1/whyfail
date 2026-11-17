@@ -888,11 +888,20 @@ type commitStatus struct {
 	State   string `json:"state"`
 }
 
-// checkRun is one entry from the Checks API, which GitHub Actions uses.
+// checkRun is one entry from the Checks API, which GitHub Actions uses. The API
+// identifies a run by (app, name, head_sha, check_suite), not by name alone: two
+// workflows can emit the same job name, so App is part of the run's identity.
 type checkRun struct {
-	Name       string  `json:"name"`
-	Status     string  `json:"status"`
-	Conclusion *string `json:"conclusion"`
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`
+	Conclusion *string   `json:"conclusion"`
+	App        *checkApp `json:"app"`
+}
+
+// checkApp is the app that owns a check run. It is null on a run left behind by
+// an app that has since been removed, so it is a pointer.
+type checkApp struct {
+	Slug string `json:"slug"`
 }
 
 // checkRunsPage is the Checks API envelope. Unlike the statuses endpoint, which
@@ -939,14 +948,21 @@ func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org,
 	}
 
 	var cards []render.PRCard
+	// A card is keyed by the API it came from as well as the name it carries:
+	// two workflows can emit the same job name, and collapsing them by name
+	// silently dropped one of them from a list meant to be exhaustive.
 	seen := map[string]bool{}
-	// Statuses first: the API returns the newest entry per context first, and
-	// Prow's names are the ones job-name synthesis understands.
+	// A status claims its name outright: Prow's context is what job-name
+	// synthesis understands, so it beats a check run that reuses the name.
+	claimed := map[string]bool{}
+	// Statuses first: the API returns the newest entry per context first.
 	for _, s := range statuses {
-		if seen[s.Context] {
+		key := render.SourceStatus + "|" + s.Context
+		if seen[key] {
 			continue
 		}
-		seen[s.Context] = true
+		seen[key] = true
+		claimed[s.Context] = true
 		if s.State != "failure" && s.State != "error" {
 			continue
 		}
@@ -954,21 +970,32 @@ func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org,
 		if test == s.Context || test == "" {
 			// A failing check with no Prow job behind it: report it rather than
 			// dropping it, which is what made an all-Actions PR look clean.
-			cards = append(cards, render.PRCard{Check: s.Context})
+			cards = append(cards, render.PRCard{Check: s.Context, Source: render.SourceStatus})
 			continue
 		}
 		cards = append(cards, render.PRCard{
-			Check: s.Context,
-			Job:   "pull-ci-" + org + "-" + repo + "-" + branch + "-" + test,
-			Prow:  true,
+			Check:  s.Context,
+			Job:    "pull-ci-" + org + "-" + repo + "-" + branch + "-" + test,
+			Source: render.SourceStatus,
+			Prow:   true,
 		})
 	}
 	for _, r := range runs {
-		if seen[r.Name] || !failingCheckRun(r) {
+		app := ""
+		if r.App != nil {
+			app = r.App.Slug
+		}
+		if claimed[r.Name] || !failingCheckRun(r) {
 			continue
 		}
-		seen[r.Name] = true
-		cards = append(cards, render.PRCard{Check: r.Name})
+		// An empty slug is its own bucket rather than a wildcard: a run from a
+		// vanished app must not absorb one from a live app.
+		key := render.SourceCheckRun + "|" + r.Name + "|" + app
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		cards = append(cards, render.PRCard{Check: r.Name, App: app, Source: render.SourceCheckRun})
 	}
 
 	// Each Collect already fans out internally, so keep the outer width small.

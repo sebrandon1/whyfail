@@ -400,6 +400,27 @@ func TestPRCardLine(t *testing.T) {
 	}
 }
 
+// Two apps can emit a check of the same name; the card list must keep both
+// rows and make them tellable apart. A name that appears once is unchanged.
+func TestPRDisambiguatesRepeatedCheckNames(t *testing.T) {
+	st := term.Config(new(bytes.Buffer), "never", 100)
+	var buf bytes.Buffer
+	PR(&buf, st, "org", "repo", "1", "two apps share a job name", []PRCard{
+		{Check: "test", App: "github-actions", Source: SourceCheckRun},
+		{Check: "test", App: "circleci", Source: SourceCheckRun},
+		{Check: "lint", Source: SourceCheckRun},
+	})
+	out := buf.String()
+	for _, want := range []string{"test (github-actions)", "test (circleci)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "lint (") {
+		t.Errorf("a unique check name should not be suffixed:\n%s", out)
+	}
+}
+
 func TestIsText(t *testing.T) {
 	if !isText([]byte("hello\nworld")) {
 		t.Error("plain text should be text")

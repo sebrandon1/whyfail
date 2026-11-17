@@ -952,8 +952,34 @@ func isText(b []byte) bool {
 type PRCard struct {
 	Check  string          `json:"check"`
 	Job    string          `json:"job,omitempty"`
+	App    string          `json:"app,omitempty"`
+	Source string          `json:"source,omitempty"`
 	Prow   bool            `json:"prow"`
 	Health *health.Summary `json:"health"`
+}
+
+// The APIs a failing check can be reported through. Source carries one of these
+// and nothing else; the disambiguation below switches on them, so a new source
+// cannot silently grow a broken label.
+const (
+	SourceStatus   = "status"
+	SourceCheckRun = "check_run"
+)
+
+// disambiguator names where a card came from, for the rows whose check name
+// repeats. The app slug is the better label; a status has none, so it falls
+// back to the source.
+func (c PRCard) disambiguator() string {
+	if c.App != "" {
+		return " (" + c.App + ")"
+	}
+	switch c.Source {
+	case SourceStatus:
+		return " (status)"
+	case SourceCheckRun:
+		return " (check run)"
+	}
+	return ""
 }
 
 // PR renders a PR's failing checks against the shared gutter, so the check
@@ -971,9 +997,20 @@ func PR(w io.Writer, st term.Style, org, repo, num, title string, cards []PRCard
 	if jobW > 60 {
 		jobW = 60
 	}
+	// Different apps can emit the same check name, so a repeated name is told
+	// apart by its app (or, for a status, by its source). A name that appears
+	// once renders exactly as it did before.
+	repeats := map[string]int{}
+	for _, c := range cards {
+		repeats[c.Check]++
+	}
 	bad := 0
 	for _, c := range cards {
-		fmt.Fprint(w, PRCardLine(st, c, jobW))
+		suffix := ""
+		if repeats[c.Check] > 1 {
+			suffix = c.disambiguator()
+		}
+		fmt.Fprint(w, prCardLine(st, c, jobW, suffix))
 		if c.Health != nil && c.Health.Verdict.IsBad() {
 			bad++
 		}
@@ -990,9 +1027,15 @@ const cardLabelW = 11
 // or as a check with no Prow job behind it, never as healthy. The detail column
 // is dropped rather than overflowing a narrow terminal.
 func PRCardLine(st term.Style, c PRCard, jobW int) string {
+	return prCardLine(st, c, jobW, "")
+}
+
+// prCardLine renders one check with suffix appended to a non-Prow name. The
+// caller supplies the suffix only when that name repeats across cards.
+func prCardLine(st term.Style, c PRCard, jobW int, suffix string) string {
 	name := c.Job
 	if name == "" {
-		name = c.Check
+		name = c.Check + suffix
 	}
 	name = term.PadRight(term.TruncMiddle(name, jobW), jobW)
 
