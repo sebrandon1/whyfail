@@ -49,10 +49,11 @@ type globals struct {
 	retries       int
 	cacheMax      string
 	cacheMaxBytes int64
+	timeout       time.Duration
 }
 
 func main() {
-	g := &globals{bytesPerToken: 4, baseline: 10 * time.Minute, colorMode: "auto", retries: 2}
+	g := &globals{bytesPerToken: 4, baseline: 10 * time.Minute, colorMode: "auto", retries: 2, timeout: 2 * time.Minute}
 	root := &cobra.Command{
 		Use:           "whyfail",
 		Short:         "Prow CI context for humans and Claude Code",
@@ -72,6 +73,7 @@ func main() {
 	root.PersistentFlags().IntVar(&g.width, "width", 0, "output width in columns (default: $COLUMNS or 100)")
 	root.PersistentFlags().IntVar(&g.retries, "retries", 2, "retry transient HTTP failures (429, 5xx) this many times")
 	root.PersistentFlags().StringVar(&g.cacheMax, "cache-max", "512MB", "object cache size limit (e.g. 512MB, 2GB); 0 disables pruning")
+	root.PersistentFlags().DurationVar(&g.timeout, "timeout", 2*time.Minute, "overall deadline for a command (e.g. 30s, 5m); 0 disables")
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		n, err := parseByteSize(g.cacheMax)
 		if err != nil {
@@ -90,6 +92,24 @@ func main() {
 		fmt.Fprintln(os.Stderr, "whyfail:", err)
 		os.Exit(1)
 	}
+}
+
+// ctx returns a context bounded by --timeout. A zero timeout means no
+// deadline, for a user on a slow link.
+func (g *globals) ctx() (context.Context, context.CancelFunc) {
+	if g.timeout <= 0 {
+		return context.WithCancel(context.Background())
+	}
+	return context.WithTimeout(context.Background(), g.timeout)
+}
+
+// timeoutError replaces a bare deadline overrun with a message that names the
+// operation and the flag to raise. Every other error passes through untouched.
+func (g *globals) timeoutError(label string, err error) error {
+	if err == nil || g.timeout <= 0 || !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return fmt.Errorf("%s timed out after %s (raise --timeout or narrow the request)", label, g.timeout)
 }
 
 // style resolves how human output should be painted. It inspects stdout rather
@@ -218,12 +238,14 @@ func newRunCmd(g *globals) *cobra.Command {
 		Use:   "run <prow-url | gs://bucket/path>",
 		Short: "Digest a single Prow job run",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			ref, err := prow.ParseRef(args[0])
 			if err != nil {
 				return err
 			}
-			ctx := context.Background()
+			ctx, cancel := g.ctx()
+			defer cancel()
+			defer func() { err = g.timeoutError(cmd.CommandPath(), err) }()
 			c := newClient(g)
 			start := time.Now()
 
@@ -301,8 +323,10 @@ func newJobCmd(g *globals) *cobra.Command {
 		Use:   "job <job-name>",
 		Short: "Job health over retained Prow history",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			ctx, cancel := g.ctx()
+			defer cancel()
+			defer func() { err = g.timeoutError(cmd.CommandPath(), err) }()
 			c := newClient(g)
 			start := time.Now()
 			sum, err := health.Collect(ctx, c, g.bucket, args[0], g.window)
@@ -334,12 +358,14 @@ func newFailuresCmd(g *globals) *cobra.Command {
 		Use:   "failures <prow-url>",
 		Short: "Failed tests and steps only",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			ref, err := prow.ParseRef(args[0])
 			if err != nil {
 				return err
 			}
-			ctx := context.Background()
+			ctx, cancel := g.ctx()
+			defer cancel()
+			defer func() { err = g.timeoutError(cmd.CommandPath(), err) }()
 			c := newClient(g)
 			start := time.Now()
 			d, err := run.Build(ctx, c, ref, run.Options{History: false})
@@ -377,13 +403,15 @@ func newLogCmd(g *globals) *cobra.Command {
 		Use:   "log <prow-url> <step> [--tail N]",
 		Short: "Bounded view of a step's build log",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			ref, err := prow.ParseRef(args[0])
 			if err != nil {
 				return err
 			}
 			step := args[1]
-			ctx := context.Background()
+			ctx, cancel := g.ctx()
+			defer cancel()
+			defer func() { err = g.timeoutError(cmd.CommandPath(), err) }()
 			c := newClient(g)
 			start := time.Now()
 
@@ -485,12 +513,14 @@ func newArtifactCmd(g *globals) *cobra.Command {
 		Use:   "artifact <gcs-url | gs://bucket/object>",
 		Short: "Metadata and a bounded excerpt for a GCS artifact",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			bucket, object, err := prow.ParseArtifactURL(args[0])
 			if err != nil {
 				return err
 			}
-			ctx := context.Background()
+			ctx, cancel := g.ctx()
+			defer cancel()
+			defer func() { err = g.timeoutError(cmd.CommandPath(), err) }()
 			c := newClient(g)
 			start := time.Now()
 
@@ -588,8 +618,10 @@ func newSearchCmd(g *globals) *cobra.Command {
 		Use:   "search <regex>",
 		Short: "Count matching runs on search.ci",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			ctx, cancel := g.ctx()
+			defer cancel()
+			defer func() { err = g.timeoutError(cmd.CommandPath(), err) }()
 			c := newClient(g)
 			start := time.Now()
 			res, err := enrich.SearchCI(ctx, c.HTTP, args[0], maxAge)
@@ -807,7 +839,7 @@ func newPRCmd(g *globals) *cobra.Command {
 		Use:   "pr <github-pr-url>",
 		Short: "Health of every failing check on a PR's head commit",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			m := prURLRe.FindStringSubmatch(args[0])
 			if m == nil {
 				return fmt.Errorf("not a GitHub PR URL: %s", args[0])
@@ -816,7 +848,9 @@ func newPRCmd(g *globals) *cobra.Command {
 			if _, err := exec.LookPath("gh"); err != nil {
 				return fmt.Errorf("the pr command needs the gh CLI for GitHub access")
 			}
-			ctx := context.Background()
+			ctx, cancel := g.ctx()
+			defer cancel()
+			defer func() { err = g.timeoutError(cmd.CommandPath(), err) }()
 			c := newClient(g)
 			start := time.Now()
 
@@ -1103,8 +1137,11 @@ func serveMCP(g *globals) error {
 	return sc.Err()
 }
 
-func mcpCall(g *globals, name string, args map[string]any) (string, error) {
-	ctx := context.Background()
+func mcpCall(g *globals, name string, args map[string]any) (text string, err error) {
+	// The bound is per tool call, not around serveMCP: the server is long-lived.
+	ctx, cancel := g.ctx()
+	defer cancel()
+	defer func() { err = g.timeoutError("tool "+name, err) }()
 	c := newClient(g)
 	switch name {
 	case "prow_run":

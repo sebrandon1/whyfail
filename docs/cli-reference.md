@@ -41,6 +41,7 @@ Global flags apply to every command:
 | `--bytes-per-token <n>` | bytes-per-token estimate used by `gain` |
 | `--baseline <dur>` | modelled manual time per call used by `gain` |
 | `--retries <n>` | retry transient HTTP failures (429, 5xx) `n` times (default 2) |
+| `--timeout <dur>` | overall deadline for a command, e.g. `30s` or `5m`; `0` disables (default 2m) |
 | `--cache-max <size>` | object-cache limit, e.g. `512MB` or `2GB`; `0` disables pruning (default 512MB) |
 | `--color auto\|always\|never` | colourise human output (default `auto`: only on a TTY) |
 | `--width <n>` | output width in columns (default `$COLUMNS`, else 100) |
