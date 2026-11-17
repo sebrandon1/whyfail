@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -489,6 +490,155 @@ func TestJSONSchemas(t *testing.T) {
 				t.Errorf("%s: missing top-level %q", c.name, k)
 			}
 		}
+	}
+}
+
+// readStats reads every record appended so far. A missing file is an empty
+// ledger, not a failure: nothing has been recorded yet.
+func readStats(t *testing.T) []stats.Record {
+	t.Helper()
+	f, err := os.Open(stats.Path())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	var recs []stats.Record
+	dec := json.NewDecoder(f)
+	for {
+		var r stats.Record
+		err := dec.Decode(&r)
+		if errors.Is(err, io.EOF) {
+			return recs
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		recs = append(recs, r)
+	}
+}
+
+// captureStdout runs fn with os.Stdout redirected and returns what it wrote.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// An agent looping through MCP is the highest-volume path through the tool, so
+// a tool call is usage and must land in the ledger — with its target named, and
+// without a byte reaching stdout, which carries JSON-RPC on this path.
+func TestMCPCallRecordsStats(t *testing.T) {
+	t.Setenv("WHYFAIL_CACHE_DIR", t.TempDir())
+	t.Setenv("WHYFAIL_NO_STATS", "")
+
+	const badURL = "not-a-prow-url"
+	var callErr error
+	out := captureStdout(t, func() {
+		_, callErr = mcpCall(&globals{}, "prow_run", map[string]any{"url": badURL})
+	})
+	if callErr == nil {
+		t.Fatal("a bad url should fail")
+	}
+	if out != "" {
+		t.Errorf("mcpCall wrote %q to stdout", out)
+	}
+
+	recs := readStats(t)
+	if len(recs) != 1 {
+		t.Fatalf("records = %+v, want exactly one", recs)
+	}
+	if recs[0].Cmd != "mcp/prow_run" || recs[0].Target != badURL {
+		t.Errorf("record = %+v, want cmd mcp/prow_run target %q", recs[0], badURL)
+	}
+	// A failed call is recorded at the size of its error: a retry loop against a
+	// bad URL must show up rather than look free.
+	if want := int64(len(callErr.Error())); recs[0].EmittedBytes != want {
+		t.Errorf("emitted = %d, want %d", recs[0].EmittedBytes, want)
+	}
+}
+
+func TestMCPTarget(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"prow_run", map[string]any{"url": "https://prow/view/gs/bucket/pr-logs/pull/o_r/1/job/2"}, "https://prow/view/gs/bucket/pr-logs/pull/o_r/1/job/2"},
+		{"prow_job", map[string]any{"job": "pull-ci-o-r-main-unit"}, "pull-ci-o-r-main-unit"},
+		// A missing or mistyped argument leaves the target empty rather than
+		// inventing one, and an unknown tool has nothing to name.
+		{"prow_run", map[string]any{}, ""},
+		{"prow_job", map[string]any{"job": 7}, ""},
+		{"other", map[string]any{"url": "x"}, ""},
+	}
+	for _, c := range cases {
+		if got := mcpTarget(c.name, c.args); got != c.want {
+			t.Errorf("mcpTarget(%q, %v) = %q, want %q", c.name, c.args, got, c.want)
+		}
+	}
+}
+
+func TestMCPCallHonoursNoStats(t *testing.T) {
+	t.Setenv("WHYFAIL_CACHE_DIR", t.TempDir())
+	t.Setenv("WHYFAIL_NO_STATS", "")
+
+	_, _ = mcpCall(&globals{noStats: true}, "prow_job", map[string]any{"job": "j"})
+	if recs := readStats(t); len(recs) != 0 {
+		t.Errorf("records = %+v, want none with --no-stats", recs)
+	}
+}
+
+// A notification carries no id, so nobody can read a result for it; running it
+// would spend the work and inflate the ledger with a call the agent cannot use.
+func TestMCPNotificationIsNotRun(t *testing.T) {
+	t.Setenv("WHYFAIL_CACHE_DIR", t.TempDir())
+	t.Setenv("WHYFAIL_NO_STATS", "")
+
+	line := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"prow_run","arguments":{"url":"not-a-prow-url"}}}`
+	in, err := os.CreateTemp(t.TempDir(), "in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := in.WriteString(line + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = in.Close() }()
+
+	oldIn := os.Stdin
+	os.Stdin = in
+	defer func() { os.Stdin = oldIn }()
+
+	out := captureStdout(t, func() {
+		if err := serveMCP(&globals{}); err != nil {
+			t.Fatalf("serveMCP: %v", err)
+		}
+	})
+	if out != "" {
+		t.Errorf("notification produced a response: %q", out)
+	}
+	if recs := readStats(t); len(recs) != 0 {
+		t.Errorf("records = %+v, want none for a notification", recs)
 	}
 }
 
