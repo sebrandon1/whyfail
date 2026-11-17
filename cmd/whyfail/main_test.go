@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -427,5 +428,55 @@ func TestJSONSchemas(t *testing.T) {
 				t.Errorf("%s: missing top-level %q", c.name, k)
 			}
 		}
+	}
+}
+
+func TestCtxHonoursTimeout(t *testing.T) {
+	g := &globals{timeout: 5 * time.Millisecond}
+	ctx, cancel := g.ctx()
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			t.Fatalf("ctx.Err() = %v, want DeadlineExceeded", ctx.Err())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ctx had no deadline")
+	}
+}
+
+func TestCtxZeroTimeoutHasNoDeadline(t *testing.T) {
+	g := &globals{timeout: 0}
+	ctx, cancel := g.ctx()
+	defer cancel()
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("zero timeout should mean no deadline")
+	}
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("ctx.Err() = %v, want nil", err)
+	}
+}
+
+func TestTimeoutErrorMessage(t *testing.T) {
+	g := &globals{timeout: 2 * time.Minute}
+
+	if err := g.timeoutError("whyfail job", nil); err != nil {
+		t.Fatalf("nil error changed into %v", err)
+	}
+	plain := errors.New("boom")
+	if got := g.timeoutError("whyfail job", plain); got != plain {
+		t.Fatalf("non-deadline error changed into %v", got)
+	}
+	got := g.timeoutError("whyfail job", fmt.Errorf("fetch: %w", context.DeadlineExceeded))
+	if got == nil || !strings.Contains(got.Error(), "whyfail job timed out after 2m0s") {
+		t.Fatalf("error %v does not name the operation and the bound", got)
+	}
+	if !strings.Contains(got.Error(), "--timeout") {
+		t.Fatalf("error %v does not point at --timeout", got)
+	}
+
+	off := &globals{timeout: 0}
+	if got := off.timeoutError("whyfail job", context.DeadlineExceeded); !errors.Is(got, context.DeadlineExceeded) {
+		t.Fatalf("with --timeout 0 the raw error should pass through, got %v", got)
 	}
 }
