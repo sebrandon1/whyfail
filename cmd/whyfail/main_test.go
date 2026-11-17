@@ -17,6 +17,7 @@ import (
 	"github.com/sebrandon1/whyfail/internal/enrich"
 	"github.com/sebrandon1/whyfail/internal/gcstest"
 	"github.com/sebrandon1/whyfail/internal/health"
+	"github.com/sebrandon1/whyfail/internal/render"
 	"github.com/sebrandon1/whyfail/internal/run"
 	"github.com/sebrandon1/whyfail/internal/stats"
 	"github.com/sebrandon1/whyfail/internal/term"
@@ -165,6 +166,66 @@ func TestCollectPRChecks(t *testing.T) {
 	}
 	if cards[1].Job != "" {
 		t.Errorf("non-Prow check got a job name: %q", cards[1].Job)
+	}
+}
+
+// Two workflows can emit a job with the same name. Each is a separate check, so
+// both must surface; a re-run of one of them still reports once.
+func TestCollectPRChecksSameNameDifferentApps(t *testing.T) {
+	const (
+		sha  = "abc123"
+		base = "repos/org/repo/commits/" + sha
+	)
+	runPages := `{"check_runs":[` +
+		`{"name":"test","status":"completed","conclusion":"failure","app":{"slug":"github-actions"}},` +
+		`{"name":"test","status":"completed","conclusion":"failure","app":{"slug":"circleci"}},` +
+		`{"name":"test","status":"completed","conclusion":"failure","app":{"slug":"github-actions"}},` +
+		`{"name":"test","status":"completed","conclusion":"failure"}]}`
+
+	cards, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
+		base + "/statuses?per_page=100":                 `[]`,
+		base + "/check-runs?per_page=100&filter=latest": runPages,
+	}), gcstest.Client(t, &gcstest.Dataset{Objects: map[string][]byte{}}), gcstest.Bucket, "org", "repo", "main", sha, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The third run repeats the first key and is a re-run, not a new check. The
+	// fourth has no app at all and is its own bucket rather than a wildcard.
+	want := []string{"github-actions", "circleci", ""}
+	if len(cards) != len(want) {
+		t.Fatalf("cards = %+v, want %d", cards, len(want))
+	}
+	for i, app := range want {
+		if cards[i].Check != "test" || cards[i].App != app {
+			t.Errorf("card %d = %+v, want check %q app %q", i, cards[i], "test", app)
+		}
+		if cards[i].Source != render.SourceCheckRun || cards[i].Prow {
+			t.Errorf("card %d = %+v, want a non-Prow check_run", i, cards[i])
+		}
+	}
+}
+
+// Prow reports through statuses, and its job-name synthesis keys off them, so a
+// status wins against a check run that reuses the name.
+func TestCollectPRChecksStatusBeatsCheckRun(t *testing.T) {
+	const (
+		sha  = "abc123"
+		base = "repos/org/repo/commits/" + sha
+	)
+	cards, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
+		base + "/statuses?per_page=100": `[{"context":"build","state":"failure"}]`,
+		base + "/check-runs?per_page=100&filter=latest": `{"check_runs":[` +
+			`{"name":"build","status":"completed","conclusion":"failure","app":{"slug":"github-actions"}}]}`,
+	}), gcstest.Client(t, &gcstest.Dataset{Objects: map[string][]byte{}}), gcstest.Bucket, "org", "repo", "main", sha, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cards) != 1 {
+		t.Fatalf("cards = %+v, want the status alone", cards)
+	}
+	if cards[0].Source != render.SourceStatus || cards[0].Check != "build" {
+		t.Errorf("card = %+v, want the status to win", cards[0])
 	}
 }
 
