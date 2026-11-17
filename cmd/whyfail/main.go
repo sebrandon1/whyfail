@@ -173,12 +173,19 @@ func parseByteSize(s string) (int64, error) {
 // emit writes the rendered output and records one stats entry.
 func (g *globals) emit(buf *bytes.Buffer, rec stats.Record, c *gcs.Client, start time.Time) {
 	_, _ = os.Stdout.Write(buf.Bytes())
+	// Count visible bytes only, so escape sequences never inflate the savings.
+	rec.EmittedBytes = int64(term.PlainBytes(buf.String()))
+	g.record(rec, c, start)
+}
+
+// record appends one stats entry. It is best-effort: a failure to record must
+// not fail a command, and the MCP path must never write anything but JSON-RPC
+// frames to stdout, so the write goes to the stats file alone.
+func (g *globals) record(rec stats.Record, c *gcs.Client, start time.Time) {
 	if g.noStats || !stats.Enabled() {
 		return
 	}
 	rec.TS = time.Now().UTC()
-	// Count visible bytes only, so escape sequences never inflate the savings.
-	rec.EmittedBytes = int64(term.PlainBytes(buf.String()))
 	if c != nil {
 		rec.ReadBytes = c.ServedBytes
 		rec.NetworkBytes = c.NetworkBytes
@@ -1115,6 +1122,11 @@ func serveMCP(g *globals) error {
 				Arguments map[string]any `json:"arguments"`
 			}
 			_ = json.Unmarshal(req.Params, &p)
+			if req.ID == nil {
+				// A notification asks for no response, so running the call would
+				// spend the work and record a use nobody can read the result of.
+				continue
+			}
 			text, err := mcpCall(g, p.Name, p.Arguments)
 			if err != nil {
 				resp["error"] = map[string]any{"code": -32000, "message": err.Error()}
@@ -1143,8 +1155,25 @@ func mcpCall(g *globals, name string, args map[string]any) (text string, err err
 	// The bound is per tool call, not around serveMCP: the server is long-lived.
 	ctx, cancel := g.ctx()
 	defer cancel()
-	defer func() { err = g.timeoutError("tool "+name, err) }()
+	start := time.Now()
 	c := newClient(g)
+	// An agent looping over failing checks is the highest-volume path through
+	// the tool, so every call is recorded like a CLI command. The record goes to
+	// the stats file, never to stdout, which is the JSON-RPC transport here. A
+	// failed call is recorded too: a retry loop against a bad URL is usage, and
+	// leaving it out would flatter the reported ratio.
+	defer func() {
+		rec := stats.Record{Cmd: "mcp/" + name, Target: mcpTarget(name, args)}
+		if err != nil {
+			rec.EmittedBytes = int64(len(err.Error()))
+		} else {
+			rec.EmittedBytes = int64(len(text))
+		}
+		g.record(rec, c, start)
+	}()
+	// Registered after the record so it runs first: the recorded error is then
+	// the one the caller sees, not a bare context deadline.
+	defer func() { err = g.timeoutError("tool "+name, err) }()
 	switch name {
 	case "prow_run":
 		raw, _ := args["url"].(string)
@@ -1168,4 +1197,18 @@ func mcpCall(g *globals, name string, args map[string]any) (text string, err err
 		return string(b), nil
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
+}
+
+// mcpTarget names what a tool call was aimed at, so its record reads without
+// the arguments: the run URL for prow_run, the job name for prow_job.
+func mcpTarget(name string, args map[string]any) string {
+	switch name {
+	case "prow_run":
+		s, _ := args["url"].(string)
+		return s
+	case "prow_job":
+		s, _ := args["job"].(string)
+		return s
+	}
+	return ""
 }
