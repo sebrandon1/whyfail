@@ -997,32 +997,60 @@ func newPRCmd(g *globals) *cobra.Command {
 			c := newClient(g)
 			start := time.Now()
 
-			meta, err := ghJSON(ctx, "repos/"+org+"/"+repo+"/pulls/"+num)
-			if err != nil {
-				return err
-			}
-			sha := stringField(meta, "head", "sha")
-			base := stringField(meta, "base", "ref")
-			title, _ := meta["title"].(string)
-			if sha == "" {
-				return fmt.Errorf("could not read head SHA for %s", args[0])
-			}
-
-			cards, warning, err := collectPRChecks(ctx, execGH, c, g.bucket, org, repo, base, sha, g.window)
+			doc, err := buildPRReport(ctx, g, c, execGH, args[0])
 			if err != nil {
 				return err
 			}
 
 			var buf bytes.Buffer
 			if g.jsonOut {
-				writeJSON(&buf, prOut{Schema: api.SchemaV1, PR: args[0], Title: title, SHA: sha, Failing: cards, Warning: warning})
+				writeJSON(&buf, doc)
 			} else {
-				render.PR(&buf, g.style(), org, repo, num, title, cards, warning)
+				render.PR(&buf, g.style(), org, repo, num, doc.Title, doc.Failing, doc.Warning)
 			}
 			g.emit(&buf, stats.Record{Cmd: "pr", Target: org + "/" + repo + "#" + num, Repo: org + "/" + repo}, c, start)
 			return nil
 		},
 	}
+}
+
+// buildPRReport resolves a PR and collects the health of every failing check.
+// It takes the gh seam rather than calling execGH, so the CLI and the MCP server
+// share one path and tests can drive it without a real gh.
+func buildPRReport(ctx context.Context, g *globals, c *gcs.Client, gh ghAPI, prURL string) (*prOut, error) {
+	m := prURLRe.FindStringSubmatch(prURL)
+	if m == nil {
+		return nil, fmt.Errorf("not a GitHub PR URL: %s", prURL)
+	}
+	org, repo, num := m[1], m[2], m[3]
+
+	raw, err := gh(ctx, "repos/"+org+"/"+repo+"/pulls/"+num, false)
+	if err != nil {
+		return nil, err
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return nil, fmt.Errorf("decode pull request: %w", err)
+	}
+	sha := stringField(meta, "head", "sha")
+	base := stringField(meta, "base", "ref")
+	title, _ := meta["title"].(string)
+	if sha == "" {
+		return nil, fmt.Errorf("could not read head SHA for %s", prURL)
+	}
+
+	cards, warning, err := collectPRChecks(ctx, gh, c, g.bucket, org, repo, base, sha, g.window)
+	if err != nil {
+		return nil, err
+	}
+	return &prOut{
+		Schema:  api.SchemaV1,
+		PR:      prURL,
+		Title:   title,
+		SHA:     sha,
+		Failing: cards,
+		Warning: warning,
+	}, nil
 }
 
 // commitStatus is one entry from the legacy commit-status API, which Prow uses.
@@ -1282,6 +1310,7 @@ func serveMCP(g *globals) error {
 	tools := []map[string]any{
 		{"name": "prow_run", "description": "Digest of a Prow job run", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}}, "required": []string{"url"}}},
 		{"name": "prow_job", "description": "Health of a Prow job over retained history", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"job": map[string]any{"type": "string"}}, "required": []string{"job"}}},
+		{"name": "prow_pr", "description": "Health of every failing check on a pull request's head commit", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"pr": map[string]any{"type": "string"}}, "required": []string{"pr"}}},
 	}
 
 	for sc.Scan() {
@@ -1382,6 +1411,14 @@ func mcpCall(g *globals, name string, args map[string]any) (text string, err err
 		}
 		b, _ := json.Marshal(sum)
 		return string(b), nil
+	case "prow_pr":
+		prURL, _ := args["pr"].(string)
+		doc, err := buildPRReport(ctx, g, c, execGH, prURL)
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(doc)
+		return string(b), nil
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
 }
@@ -1392,6 +1429,13 @@ func mcpCall(g *globals, name string, args map[string]any) (text string, err err
 // the CLI commands. A job name does not identify a repository — both org and
 // repo may contain dashes — so prow_job records none rather than guessing.
 func mcpRepo(name string, args map[string]any) string {
+	if name == "prow_pr" {
+		s, _ := args["pr"].(string)
+		if m := prURLRe.FindStringSubmatch(s); m != nil {
+			return m[1] + "/" + m[2]
+		}
+		return ""
+	}
 	if name != "prow_run" {
 		return ""
 	}
@@ -1410,6 +1454,9 @@ func mcpTarget(name string, args map[string]any) string {
 		return s
 	case "prow_job":
 		s, _ := args["job"].(string)
+		return s
+	case "prow_pr":
+		s, _ := args["pr"].(string)
 		return s
 	}
 	return ""
