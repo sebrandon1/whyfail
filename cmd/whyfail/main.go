@@ -222,6 +222,16 @@ type artifactOut struct {
 	Truncated   bool   `json:"truncated"`
 }
 
+// artifactListOut is the listing form of `artifact`, which is a different
+// document from the single-object one: `objects` present means a listing.
+type artifactListOut struct {
+	Schema     string                 `json:"schema"`
+	Prefix     string                 `json:"prefix"`
+	Objects    []render.ArtifactEntry `json:"objects"`
+	TotalBytes int64                  `json:"total_bytes"`
+	Truncated  bool                   `json:"truncated"`
+}
+
 type prOut struct {
 	Schema  string          `json:"schema"`
 	PR      string          `json:"pr"`
@@ -546,7 +556,20 @@ func newArtifactCmd(g *globals) *cobra.Command {
 					total += o.Size
 				}
 				var buf bytes.Buffer
-				render.ArtifactList(&buf, g.style(), entries, truncated)
+				// Both forms are built from the same entries and total, so the
+				// table and the document cannot disagree. A prefix with nothing
+				// under it is an empty list, not an error.
+				if g.jsonOut {
+					writeJSON(&buf, artifactListOut{
+						Schema:     api.SchemaV1,
+						Prefix:     object,
+						Objects:    entries,
+						TotalBytes: total,
+						Truncated:  truncated,
+					})
+				} else {
+					render.ArtifactList(&buf, g.style(), entries, truncated)
+				}
 				g.emit(&buf, stats.Record{Cmd: "artifact-list", Target: object, InventoryBytes: total}, c, start)
 				return nil
 			}
