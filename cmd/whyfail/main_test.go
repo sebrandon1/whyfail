@@ -727,6 +727,11 @@ func TestMCPCallRecordsStats(t *testing.T) {
 	if recs[0].Cmd != "mcp/prow_run" || recs[0].Target != badURL {
 		t.Errorf("record = %+v, want cmd mcp/prow_run target %q", recs[0], badURL)
 	}
+	// A URL that will not parse names no repository; an invented one would file
+	// the call under the wrong repo in gain --by repo.
+	if recs[0].Repo != "" {
+		t.Errorf("repo = %q, want empty for an unparseable url", recs[0].Repo)
+	}
 	// A failed call is recorded at the size of its error: a retry loop against a
 	// bad URL must show up rather than look free.
 	if want := int64(len(callErr.Error())); recs[0].EmittedBytes != want {
@@ -751,6 +756,30 @@ func TestMCPTarget(t *testing.T) {
 	for _, c := range cases {
 		if got := mcpTarget(c.name, c.args); got != c.want {
 			t.Errorf("mcpTarget(%q, %v) = %q, want %q", c.name, c.args, got, c.want)
+		}
+	}
+}
+
+// The repo is derived the same way a CLI command derives it, and never guessed:
+// a job name does not identify a repository, and a URL that will not parse names
+// nothing at all.
+func TestMCPRepo(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"prow_run", map[string]any{"url": "gs://b/pr-logs/pull/org_repo/1/job/2"}, "org/repo"},
+		{"prow_run", map[string]any{"url": "https://prow.ci.openshift.org/view/gs/buk/pr-logs/pull/rh-ecosystem-edge_recert/2364/job/9"}, "rh-ecosystem-edge/recert"},
+		// A periodic run has no PR path, so there is no repository to name.
+		{"prow_run", map[string]any{"url": "gs://b/logs/pull-ci-org-repo-main-unit/123"}, ""},
+		{"prow_run", map[string]any{"url": "not-a-prow-url"}, ""},
+		{"prow_job", map[string]any{"job": "pull-ci-org-repo-main-unit"}, ""},
+		{"other", map[string]any{"url": "gs://b/pr-logs/pull/org_repo/1/job/2"}, ""},
+	}
+	for _, c := range cases {
+		if got := mcpRepo(c.name, c.args); got != c.want {
+			t.Errorf("mcpRepo(%q, %v) = %q, want %q", c.name, c.args, got, c.want)
 		}
 	}
 }

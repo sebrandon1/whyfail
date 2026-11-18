@@ -1240,7 +1240,7 @@ func mcpCall(g *globals, name string, args map[string]any) (text string, err err
 	// failed call is recorded too: a retry loop against a bad URL is usage, and
 	// leaving it out would flatter the reported ratio.
 	defer func() {
-		rec := stats.Record{Cmd: "mcp/" + name, Target: mcpTarget(name, args)}
+		rec := stats.Record{Cmd: "mcp/" + name, Target: mcpTarget(name, args), Repo: mcpRepo(name, args)}
 		if err != nil {
 			rec.EmittedBytes = int64(len(err.Error()))
 		} else {
@@ -1278,6 +1278,21 @@ func mcpCall(g *globals, name string, args map[string]any) (text string, err err
 
 // mcpTarget names what a tool call was aimed at, so its record reads without
 // the arguments: the run URL for prow_run, the job name for prow_job.
+// mcpRepo names the repository a tool call read, using the same derivation as
+// the CLI commands. A job name does not identify a repository — both org and
+// repo may contain dashes — so prow_job records none rather than guessing.
+func mcpRepo(name string, args map[string]any) string {
+	if name != "prow_run" {
+		return ""
+	}
+	s, _ := args["url"].(string)
+	ref, err := prow.ParseRef(s)
+	if err != nil {
+		return ""
+	}
+	return prow.Repo(ref.ObjectPath)
+}
+
 func mcpTarget(name string, args map[string]any) string {
 	switch name {
 	case "prow_run":
