@@ -13,6 +13,7 @@ whyfail failures <prow-url>                 # failed tests and steps only
 whyfail log <prow-url> <step> [--tail N] [--grep RE]   # bounded build-log view
 whyfail artifact <gcs-url>                  # metadata and excerpt, or --list a prefix
 whyfail search <regex>                      # how often an error appears in CI
+whyfail report --jobs report/jobs.txt       # health for a curated job list, as one document
 whyfail gain                                # savings statistics
 whyfail init                                # install the Claude Code integration
 whyfail doctor                              # binary, cache, stats, endpoint checks
@@ -63,6 +64,9 @@ Command-specific flags:
   `settings.json` instead of using the plugin system), `--mcp` (also register the MCP
   server), `--from <owner/repo|url|path>` (marketplace source, default
   `sebrandon1/whyfail`), `--dry-run`, `--uninstall`, `-y/--yes`
+- `report` — `--jobs <file>` (curated list, default `report/jobs.txt`), `--out <file>`
+  (snapshot destination; default stdout), `--history <file>` (merge today's point into
+  this history file), `--keep <n>` (days of history to retain, default 180)
 
 ## Environment
 

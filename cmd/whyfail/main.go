@@ -86,7 +86,7 @@ func main() {
 	root.AddCommand(
 		newRunCmd(g), newJobCmd(g), newFailuresCmd(g), newLogCmd(g), newArtifactCmd(g),
 		newSearchCmd(g), newGainCmd(g), newHookCmd(), newDoctorCmd(g), newPRCmd(g), newMCPCmd(g),
-		newInitCmd(g),
+		newInitCmd(g), newReportCmd(g),
 	)
 	if err := root.Execute(); err != nil {
 		// A run that failed under --exit-code is a result, not a tool error: it

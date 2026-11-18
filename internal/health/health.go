@@ -14,6 +14,7 @@ import (
 	"github.com/sebrandon1/whyfail/internal/api"
 	"github.com/sebrandon1/whyfail/internal/gcs"
 	"github.com/sebrandon1/whyfail/internal/parallel"
+	"github.com/sebrandon1/whyfail/internal/prow"
 )
 
 // ErrJobNotFound is returned when a job name matches neither the presubmit
@@ -77,6 +78,20 @@ type Summary struct {
 	FailingPRs []string    `json:"failing_prs,omitempty"`
 	Verdict    Verdict     `json:"verdict"`
 	Samples    []RunResult `json:"-"`
+}
+
+// Repo names the repository this job ran for, from the first sample that came
+// from a pull-request path. A periodic job has none, which is not an error: the
+// path is the only offline source, so nothing is guessed. prow.Repo owns the
+// org_repo split (the org never contains an underscore), so this does not
+// re-implement it.
+func (s *Summary) Repo() string {
+	for _, r := range s.Samples {
+		if repo := prow.Repo(r.Path); repo != "" {
+			return repo
+		}
+	}
+	return ""
 }
 
 // Collect enumerates a job's runs and summarizes them. window <= 0 means the

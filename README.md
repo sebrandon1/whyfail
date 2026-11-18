@@ -67,6 +67,7 @@ with `--exit-code`; the digest still prints in full.
 |---|---|
 | [CLI reference](docs/cli-reference.md) | Every command, flag, environment variable, output format and cache rule |
 | [JSON output](docs/json-output.md) | The `whyfail/v1` schema, per-command keys, health semantics |
+| [Flaky-job board](docs/report.md) | The daily dashboard: `whyfail report`, the curated job list, the publishing workflow |
 | [Job health](docs/job-health.md) | Where pass rates come from and what each verdict means |
 | [Run digests](docs/run-digests.md) | The structured artifacts a digest reads, and why it is bounded |
 | [Claude Code integration](docs/claude-code.md) | Hooks, slash commands, the `prow-ci` skill, `init`, and the MCP server |
