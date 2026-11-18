@@ -30,6 +30,9 @@ const (
 	ScopeUser Scope = "user"
 	// ScopeProject is ./.claude, belonging to one repository.
 	ScopeProject Scope = "project"
+	// ScopeNone is the absence of a registration. It is a named value so a
+	// caller tests one thing rather than the empty string.
+	ScopeNone Scope = ""
 )
 
 // Paths is the set of locations a scope owns.
@@ -161,8 +164,40 @@ func MCPServersPath(home string) string {
 	return filepath.Join(home, ".claude.json")
 }
 
-// MCPRegistered reports whether name is configured as a user-scope MCP server.
-// A missing or unreadable file means "not registered".
+// ProjectMCPFile is the file `claude mcp add -s project` writes: the MCP
+// configuration at a project's root, beside its .claude directory. The name is
+// Claude Code's choice, not whyfail's, so it lives here in one place.
+const ProjectMCPFile = ".mcp.json"
+
+// MCPServersPathFor is the file an MCP server registration lands in for a
+// scope. User scope is shared; project scope belongs to one repository, which
+// is the point of --project — it must never write into $HOME.
+func MCPServersPathFor(s Scope, cwd, home string) string {
+	if s != ScopeProject {
+		return MCPServersPath(home)
+	}
+	if cwd == "" {
+		return ""
+	}
+	return filepath.Join(cwd, ProjectMCPFile)
+}
+
+// MCPRegisteredScope names the scope the marketplace server is registered in
+// for this directory. A project registration wins, because it is the one that
+// applies here; a server in neither file is ScopeNone.
+func MCPRegisteredScope(cwd, home string) Scope {
+	if MCPRegistered(MCPServersPathFor(ScopeProject, cwd, home), Marketplace) {
+		return ScopeProject
+	}
+	if MCPRegistered(MCPServersPathFor(ScopeUser, cwd, home), Marketplace) {
+		return ScopeUser
+	}
+	return ScopeNone
+}
+
+// MCPRegistered reports whether name is configured as an MCP server in the file
+// at path, whichever scope owns it. A missing or unreadable file means "not
+// registered".
 func MCPRegistered(path, name string) bool {
 	if path == "" {
 		return false

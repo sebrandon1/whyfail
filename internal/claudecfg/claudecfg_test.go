@@ -39,6 +39,43 @@ func TestForScopeHonoursClaudeConfigDir(t *testing.T) {
 	}
 }
 
+// A project registration lives in the repository, never in $HOME, and is what
+// doctor reports when both files name the server.
+func TestMCPServersPathForAndRegisteredScope(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+
+	if got, want := MCPServersPathFor(ScopeUser, cwd, home), MCPServersPath(home); got != want {
+		t.Errorf("user path = %q, want %q", got, want)
+	}
+	proj := MCPServersPathFor(ScopeProject, cwd, home)
+	if proj != filepath.Join(cwd, ProjectMCPFile) {
+		t.Fatalf("project path = %q, want the repository's own file", proj)
+	}
+	if got := MCPServersPathFor(ScopeProject, "", home); got != "" {
+		t.Errorf("project path with no cwd = %q, want empty", got)
+	}
+
+	if got := MCPRegisteredScope(cwd, home); got != ScopeNone {
+		t.Errorf("scope = %q, want none while neither file exists", got)
+	}
+
+	write := func(path string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(`{"mcpServers": {"`+Marketplace+`": {}}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(MCPServersPath(home))
+	if got := MCPRegisteredScope(cwd, home); got != ScopeUser {
+		t.Errorf("scope = %q, want user", got)
+	}
+	write(proj)
+	if got := MCPRegisteredScope(cwd, home); got != ScopeProject {
+		t.Errorf("scope = %q, want project to win in its own directory", got)
+	}
+}
+
 func TestReadState(t *testing.T) {
 	cases := []struct {
 		name    string

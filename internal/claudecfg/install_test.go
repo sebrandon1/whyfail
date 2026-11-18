@@ -300,6 +300,65 @@ func TestInstallMCP(t *testing.T) {
 	}
 }
 
+// Project scope reads the repository's own MCP file, so its second run is
+// idempotent too; looking only at the user file made it re-register.
+func TestInstallMCPProjectScope(t *testing.T) {
+	rec := &recorder{plugins: `[{"id":"whyfail@whyfail","enabled":true}]`}
+	cwd := t.TempDir()
+	paths, err := ForScope(ScopeProject, cwd, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &Installer{
+		Scope:   ScopeProject,
+		Paths:   paths,
+		From:    "sebrandon1/whyfail",
+		FS:      testFS(),
+		Exec:    rec.exec(),
+		Binary:  "/usr/bin/whyfail",
+		MCP:     true,
+		MCPPath: MCPServersPathFor(ScopeProject, cwd, ""),
+	}
+	if in.MCPPath != filepath.Join(cwd, ProjectMCPFile) {
+		t.Fatalf("MCPPath = %q, want the project's own file", in.MCPPath)
+	}
+
+	steps, err := in.Install()
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	var registered bool
+	for _, s := range steps {
+		if s.Name == "mcp" {
+			registered = s.Status == StatusOK
+		}
+	}
+	if !registered {
+		t.Fatalf("mcp step not registered: %+v", steps)
+	}
+	want := "mcp add whyfail -s project -- whyfail mcp"
+	if len(rec.calls) == 0 || rec.calls[len(rec.calls)-1] != want {
+		t.Errorf("calls = %v, want %q last", rec.calls, want)
+	}
+
+	// The second run reads the file the first one's registration landed in.
+	if err := os.WriteFile(in.MCPPath, []byte(`{"mcpServers": {"whyfail": {"command": "whyfail"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec.calls = nil
+	steps, err = in.Install()
+	if err != nil {
+		t.Fatalf("second Install: %v", err)
+	}
+	for _, s := range steps {
+		if s.Name == "mcp" {
+			if s.Status != StatusSkipped || !strings.Contains(s.Detail, "already registered") {
+				t.Errorf("mcp step = %+v, want skipped as already registered", s)
+			}
+		}
+	}
+}
+
 func TestInstallReportsTheFirstFailure(t *testing.T) {
 	rec := &recorder{plugins: `[]`, fail: "plugin install"}
 	in := newInstaller(t, rec)

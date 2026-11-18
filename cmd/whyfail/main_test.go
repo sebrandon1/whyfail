@@ -15,6 +15,7 @@ import (
 
 	"encoding/json"
 	"github.com/sebrandon1/whyfail/internal/api"
+	"github.com/sebrandon1/whyfail/internal/claudecfg"
 	"github.com/sebrandon1/whyfail/internal/enrich"
 	"github.com/sebrandon1/whyfail/internal/gcstest"
 	"github.com/sebrandon1/whyfail/internal/health"
@@ -473,12 +474,21 @@ func TestListArtifacts(t *testing.T) {
 
 func TestDoctorLocal(t *testing.T) {
 	var buf bytes.Buffer
-	doctorLocal(&buf, term.Config(new(bytes.Buffer), "never", 100), "/tmp/cache", 1<<20, 7)
+	doctorLocal(&buf, term.Config(new(bytes.Buffer), "never", 100), "/tmp/cache", 1<<20, 7, claudecfg.ScopeNone)
 	out := buf.String()
-	for _, want := range []string{"version:", "/tmp/cache (1.0 MB, 7 objects)", "stats:", "binary:", "gh:"} {
+	for _, want := range []string{"version:", "/tmp/cache (1.0 MB, 7 objects)", "stats:", "binary:", "gh:",
+		"mcp:", "not registered (run: whyfail init --mcp)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+
+	// A registration names the scope it was found in; a project one is the
+	// registration that applies in this directory.
+	buf.Reset()
+	doctorLocal(&buf, term.Config(new(bytes.Buffer), "never", 100), "/tmp/cache", 0, 0, claudecfg.ScopeProject)
+	if out := buf.String(); !strings.Contains(out, "registered (project)") {
+		t.Errorf("missing the project row in:\n%s", out)
 	}
 }
 
