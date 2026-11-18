@@ -860,10 +860,11 @@ func Search(w io.Writer, st term.Style, matches int, jobs []string, knownBug, ma
 
 // ---------- artifact ----------
 
-// ArtifactEntry is one object in an artifact listing.
+// ArtifactEntry is one object in an artifact listing. It is also the JSON shape
+// of an entry, so both forms of the listing are built from one slice.
 type ArtifactEntry struct {
-	Name string
-	Size int64
+	Name string `json:"name"`
+	Size int64  `json:"size"`
 }
 
 // ArtifactList renders a prefix listing, bounded by the caller. truncated says

@@ -19,6 +19,7 @@ existing ones keep their meaning.
 | `failures` | `schema`, `run`, `tests`, `failed_steps` |
 | `log` | `schema`, `artifact`, `lines`, `text` |
 | `artifact` | `schema`, `object`, `size`, `content_type`, `updated`, `excerpt`, `truncated` |
+| `artifact --list` | `schema`, `prefix`, `objects[]` (`name`, `size`), `total_bytes`, `truncated` |
 | `search` | `schema`, `query`, `matches`, `jobs`, `known_bug` |
 | `gain` | `schema`, `since`, `until`, `totals`, `groups`, `top_saves`, `verdicts` |
 | `pr` | `schema`, `pr`, `title`, `sha`, `failing[]` — each card is `check`, `job`, `prow`, `health`, `health_error`; `warning` appears when the lookup as a whole failed |

@@ -580,6 +580,8 @@ func TestJSONSchemas(t *testing.T) {
 		{"log", logOut{Schema: api.SchemaV1}, []string{"artifact", "lines", "text"}},
 		{"artifact", artifactOut{Schema: api.SchemaV1},
 			[]string{"object", "size", "content_type", "updated", "excerpt", "truncated"}},
+		{"artifact-list", artifactListOut{Schema: api.SchemaV1, Objects: []render.ArtifactEntry{}},
+			[]string{"prefix", "objects", "total_bytes", "truncated"}},
 		{"search", &enrich.SearchResult{Schema: api.SchemaV1}, []string{"query", "matches"}},
 		{"gain", stats.Summarize(nil, "", time.Time{}), []string{"since", "until", "totals"}},
 		{"pr", prOut{Schema: api.SchemaV1}, []string{"pr", "title", "sha", "failing"}},
@@ -605,6 +607,48 @@ func TestJSONSchemas(t *testing.T) {
 				t.Errorf("%s: missing top-level %q", c.name, k)
 			}
 		}
+	}
+}
+
+// The listing document is built from the same entries as the table, so the two
+// forms cannot disagree; an empty prefix is an empty array, not null.
+func TestArtifactListDoc(t *testing.T) {
+	doc := artifactListOut{
+		Schema:     api.SchemaV1,
+		Prefix:     "pr-logs/pull/org_repo/1/job/2/artifacts/",
+		Objects:    []render.ArtifactEntry{{Name: "a.txt", Size: 12}},
+		TotalBytes: 12,
+		Truncated:  true,
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Prefix  string `json:"prefix"`
+		Objects []struct {
+			Name string `json:"name"`
+			Size int64  `json:"size"`
+		} `json:"objects"`
+		TotalBytes int64 `json:"total_bytes"`
+		Truncated  bool  `json:"truncated"`
+	}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Prefix != doc.Prefix || m.TotalBytes != 12 || !m.Truncated {
+		t.Errorf("document = %+v", m)
+	}
+	if len(m.Objects) != 1 || m.Objects[0].Name != "a.txt" || m.Objects[0].Size != 12 {
+		t.Errorf("objects = %+v", m.Objects)
+	}
+
+	empty, err := json.Marshal(artifactListOut{Schema: api.SchemaV1, Objects: []render.ArtifactEntry{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(empty), `"objects":[]`) {
+		t.Errorf("empty listing = %s, want an empty array", empty)
 	}
 }
 
