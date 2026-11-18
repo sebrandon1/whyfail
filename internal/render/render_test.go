@@ -368,6 +368,26 @@ func TestGainEmptyAndPopulated(t *testing.T) {
 	golden(t, "gain.txt", out)
 }
 
+func TestPRCardHealthState(t *testing.T) {
+	cases := []struct {
+		name string
+		card PRCard
+		want healthState
+	}{
+		{"summary", PRCard{Health: &health.Summary{}}, healthKnown},
+		{"failed lookup", PRCard{HealthErr: "403 forbidden"}, healthFailed},
+		{"no history", PRCard{Prow: true}, healthAbsent},
+		// A summary wins even if a stale error is present: health is the
+		// outcome that was actually produced.
+		{"summary with error", PRCard{Health: &health.Summary{}, HealthErr: "x"}, healthKnown},
+	}
+	for _, c := range cases {
+		if got := c.card.healthState(); got != c.want {
+			t.Errorf("%s: state = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestPRCardLine(t *testing.T) {
 	st := term.Config(new(bytes.Buffer), "never", 100)
 	const job = "pull-ci-org-repo-main-e2e-aws"
@@ -382,6 +402,17 @@ func TestPRCardLine(t *testing.T) {
 	nonProw := PRCardLine(st, PRCard{Check: "build-and-test"}, 40)
 	if !strings.Contains(nonProw, "FAILED") || !strings.Contains(nonProw, "no Prow job") {
 		t.Errorf("non-Prow check: %q", nonProw)
+	}
+
+	// A lookup that failed says so; it must not borrow the not-found wording.
+	lookupFailed := PRCardLine(st, PRCard{Job: job, Prow: true, HealthErr: "403 forbidden"}, 40)
+	for _, want := range []string{"FAILED", "health lookup failed: 403 forbidden"} {
+		if !strings.Contains(lookupFailed, want) {
+			t.Errorf("failed lookup missing %q: %q", want, lookupFailed)
+		}
+	}
+	if strings.Contains(lookupFailed, "no history") {
+		t.Errorf("a failed lookup must not read as no history: %q", lookupFailed)
 	}
 
 	flaky := PRCardLine(st, PRCard{Job: job, Prow: true, Health: &health.Summary{
@@ -409,7 +440,7 @@ func TestPRDisambiguatesRepeatedCheckNames(t *testing.T) {
 		{Check: "test", App: "github-actions", Source: SourceCheckRun},
 		{Check: "test", App: "circleci", Source: SourceCheckRun},
 		{Check: "lint", Source: SourceCheckRun},
-	})
+	}, "")
 	out := buf.String()
 	for _, want := range []string{"test (github-actions)", "test (circleci)"} {
 		if !strings.Contains(out, want) {
@@ -541,8 +572,9 @@ func TestPRGolden(t *testing.T) {
 	PR(&buf, testStyle(), "rh-ecosystem-edge", "recert", "2364", "CNF-30065: add integration scenarios", []PRCard{
 		{Check: "ci/prow/e2e-aws", Job: "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws", Prow: true, Health: flaky},
 		{Check: "ci/prow/missing", Job: "pull-ci-rh-ecosystem-edge-recert-main-missing", Prow: true},
+		{Check: "ci/prow/timed-out", Job: "pull-ci-rh-ecosystem-edge-recert-main-timed-out", Prow: true, HealthErr: "context deadline exceeded"},
 		{Check: "lint"},
-	})
+	}, "one health lookup did not finish")
 	golden(t, "pr.txt", buf.String())
 }
 
@@ -561,7 +593,7 @@ func TestRenderWidths(t *testing.T) {
 	})
 	PR(&buf, narrow, "org", "repo", "1", "a long enough title to fold", []PRCard{
 		{Check: "ci/prow/x", Job: "pull-ci-org-repo-main-" + strings.Repeat("y", 80), Prow: true},
-	})
+	}, "a warning long enough to be worth folding when the terminal is this narrow")
 	Gain(&buf, stats.Aggregate{
 		Since:    time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
 		Totals:   stats.Totals{Calls: 2, ReadBytes: 1000, EmittedBytes: 100, NetworkBytes: 300, InventoryBytes: 5000, Missing: 3},

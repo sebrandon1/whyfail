@@ -137,7 +137,7 @@ func TestCollectPRChecks(t *testing.T) {
 		`{"name":"lint","status":"completed","conclusion":"success"},` +
 		`{"name":"e2e","status":"in_progress","conclusion":null}]}`
 
-	cards, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
+	cards, _, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
 		statuses: statusPages,
 		runs:     runPages,
 	}), gcstest.Client(t, &gcstest.Dataset{Objects: map[string][]byte{}, Listing: []gcstest.Item{
@@ -170,6 +170,57 @@ func TestCollectPRChecks(t *testing.T) {
 	}
 }
 
+// A failed health lookup is an error on the card, not a claim about the job. An
+// unserved bucket makes the listing itself fail, which is the case that used to
+// render as "no history in this bucket".
+func TestCollectPRChecksHealthLookupFailure(t *testing.T) {
+	const (
+		sha  = "abc123"
+		base = "repos/org/repo/commits/" + sha
+	)
+	cards, warning, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
+		base + "/statuses?per_page=100":                 `[{"context":"ci/prow/e2e-aws","state":"failure"}]`,
+		base + "/check-runs?per_page=100&filter=latest": `{"check_runs":[]}`,
+	}), gcstest.Client(t, &gcstest.Dataset{Objects: map[string][]byte{}}), "no-such-bucket", "org", "repo", "main", sha, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if warning != "" {
+		t.Errorf("warning = %q, want none for a failed lookup", warning)
+	}
+	if len(cards) != 1 {
+		t.Fatalf("cards = %+v, want one", cards)
+	}
+	if cards[0].Health != nil {
+		t.Errorf("health = %+v, want nil on a failed lookup", cards[0].Health)
+	}
+	if cards[0].HealthErr == "" {
+		t.Error("health_error is empty; a failed lookup must not read as no history")
+	}
+}
+
+// An absent job is not an error: ErrJobNotFound keeps the "no history" wording,
+// so the field must stay empty for it.
+func TestCollectPRChecksJobNotFoundIsNotAHealthError(t *testing.T) {
+	const (
+		sha  = "abc123"
+		base = "repos/org/repo/commits/" + sha
+	)
+	cards, _, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
+		base + "/statuses?per_page=100":                 `[{"context":"ci/prow/e2e-aws","state":"failure"}]`,
+		base + "/check-runs?per_page=100&filter=latest": `{"check_runs":[]}`,
+	}), gcstest.Client(t, &gcstest.Dataset{Objects: map[string][]byte{}}), gcstest.Bucket, "org", "repo", "main", sha, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cards) != 1 {
+		t.Fatalf("cards = %+v, want one", cards)
+	}
+	if cards[0].Health != nil || cards[0].HealthErr != "" {
+		t.Errorf("card = %+v, want no history and no error", cards[0])
+	}
+}
+
 // Two workflows can emit a job with the same name. Each is a separate check, so
 // both must surface; a re-run of one of them still reports once.
 func TestCollectPRChecksSameNameDifferentApps(t *testing.T) {
@@ -183,7 +234,7 @@ func TestCollectPRChecksSameNameDifferentApps(t *testing.T) {
 		`{"name":"test","status":"completed","conclusion":"failure","app":{"slug":"github-actions"}},` +
 		`{"name":"test","status":"completed","conclusion":"failure"}]}`
 
-	cards, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
+	cards, _, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
 		base + "/statuses?per_page=100":                 `[]`,
 		base + "/check-runs?per_page=100&filter=latest": runPages,
 	}), gcstest.Client(t, &gcstest.Dataset{Objects: map[string][]byte{}}), gcstest.Bucket, "org", "repo", "main", sha, 0)
@@ -214,7 +265,7 @@ func TestCollectPRChecksStatusBeatsCheckRun(t *testing.T) {
 		sha  = "abc123"
 		base = "repos/org/repo/commits/" + sha
 	)
-	cards, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
+	cards, _, err := collectPRChecks(context.Background(), fakeGH(t, map[string]string{
 		base + "/statuses?per_page=100": `[{"context":"build","state":"failure"}]`,
 		base + "/check-runs?per_page=100&filter=latest": `{"check_runs":[` +
 			`{"name":"build","status":"completed","conclusion":"failure","app":{"slug":"github-actions"}}]}`,

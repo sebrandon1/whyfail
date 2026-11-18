@@ -228,6 +228,9 @@ type prOut struct {
 	Title   string          `json:"title"`
 	SHA     string          `json:"sha"`
 	Failing []render.PRCard `json:"failing"`
+	// Warning carries a fan-out failure, which can only be a recovered panic:
+	// the worker itself never returns an error.
+	Warning string `json:"warning,omitempty"`
 }
 
 func writeJSON(buf *bytes.Buffer, v any) {
@@ -872,16 +875,16 @@ func newPRCmd(g *globals) *cobra.Command {
 				return fmt.Errorf("could not read head SHA for %s", args[0])
 			}
 
-			cards, err := collectPRChecks(ctx, execGH, c, g.bucket, org, repo, base, sha, g.window)
+			cards, warning, err := collectPRChecks(ctx, execGH, c, g.bucket, org, repo, base, sha, g.window)
 			if err != nil {
 				return err
 			}
 
 			var buf bytes.Buffer
 			if g.jsonOut {
-				writeJSON(&buf, prOut{Schema: api.SchemaV1, PR: args[0], Title: title, SHA: sha, Failing: cards})
+				writeJSON(&buf, prOut{Schema: api.SchemaV1, PR: args[0], Title: title, SHA: sha, Failing: cards, Warning: warning})
 			} else {
-				render.PR(&buf, g.style(), org, repo, num, title, cards)
+				render.PR(&buf, g.style(), org, repo, num, title, cards, warning)
 			}
 			g.emit(&buf, stats.Record{Cmd: "pr", Target: org + "/" + repo + "#" + num, Repo: org + "/" + repo}, c, start)
 			return nil
@@ -934,24 +937,24 @@ func failingCheckRun(r checkRun) bool {
 // through the legacy commit-status API and Actions through the Checks API, so
 // both are needed: reading statuses alone hides every Actions failure, and the
 // command then claims the PR has none.
-func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org, repo, branch, sha string, window time.Duration) ([]render.PRCard, error) {
+func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org, repo, branch, sha string, window time.Duration) ([]render.PRCard, string, error) {
 	base := "repos/" + org + "/" + repo + "/commits/" + sha
 
 	statusRaw, err := api(base+"/statuses?per_page=100", true)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	statuses, err := decodePages[commitStatus](statusRaw)
 	if err != nil {
-		return nil, fmt.Errorf("decode commit statuses: %w", err)
+		return nil, "", fmt.Errorf("decode commit statuses: %w", err)
 	}
 	runsRaw, err := api(base+"/check-runs?per_page=100&filter=latest", true)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	runs, err := decodeCheckRunPages(runsRaw)
 	if err != nil {
-		return nil, fmt.Errorf("decode check runs: %w", err)
+		return nil, "", fmt.Errorf("decode check runs: %w", err)
 	}
 
 	var cards []render.PRCard
@@ -1008,14 +1011,28 @@ func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org,
 	// Each Collect already fans out internally, so keep the outer width small.
 	// Only Prow checks have a job to look up. A lane's panic is reported by Do
 	// but does not fail the command: one check's health is optional.
-	_ = parallel.Do(len(cards), prFanOut, func(i int) error {
+	//
+	// A lookup that fails is recorded on its own card rather than folded into
+	// "no history": a 403, a timeout and an absent job are three different
+	// facts, and only the last one belongs to the job.
+	warning := ""
+	if derr := parallel.Do(len(cards), prFanOut, func(i int) error {
 		if !cards[i].Prow {
 			return nil
 		}
-		cards[i].Health, _ = health.Collect(ctx, c, bucket, cards[i].Job, window)
+		sum, err := health.Collect(ctx, c, bucket, cards[i].Job, window)
+		if err != nil {
+			if !errors.Is(err, health.ErrJobNotFound) {
+				cards[i].HealthErr = err.Error()
+			}
+			return nil
+		}
+		cards[i].Health = sum
 		return nil
-	})
-	return cards, nil
+	}); derr != nil {
+		warning = derr.Error()
+	}
+	return cards, warning, nil
 }
 
 // decodePages decodes one or more concatenated JSON arrays. `gh api --paginate`
