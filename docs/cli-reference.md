@@ -131,6 +131,7 @@ It prints one row per check:
 | `stats` | `stats.jsonl` path and whether recording is enabled |
 | `binary` | the `whyfail` on `PATH`, flagged when it is not the binary you ran |
 | `gh` | the GitHub CLI `whyfail pr` needs |
+| `mcp` | whether the MCP server is registered, and in which scope, read from the scope's own file rather than `claude mcp get` |
 | `plugin` | Claude Code integration state, read from `settings.json` |
 | `gcs` | a listing request against the Prow results bucket |
 | `sippy` | Sippy coverage probe |

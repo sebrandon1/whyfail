@@ -79,7 +79,7 @@ Nothing here is recorded in the savings statistics.`,
 				FS:        wf.PluginFS,
 				Exec:      claudeExec(g),
 				Binary:    binaryStatus(),
-				MCPPath:   claudecfg.MCPServersPath(home),
+				MCPPath:   claudecfg.MCPServersPathFor(scope, cwd, home),
 			}
 			steps, runErr := in.Install()
 

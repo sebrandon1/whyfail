@@ -769,8 +769,11 @@ func newDoctorCmd(g *globals) *cobra.Command {
 			c := newClient(g)
 			st := g.style()
 			cacheBytes, cacheFiles, _ := c.CacheSize()
-			doctorLocal(os.Stdout, st, c.CacheDir, cacheBytes, cacheFiles)
 			home, _ := os.UserHomeDir()
+			cwd, _ := os.Getwd()
+			// The MCP row is a file read in both scopes, never `claude mcp get`,
+			// so doctor stays offline and fast.
+			doctorLocal(os.Stdout, st, c.CacheDir, cacheBytes, cacheFiles, claudecfg.MCPRegisteredScope(cwd, home))
 			doctorClaude(os.Stdout, st, filepath.Join(claudecfg.ConfigDir(home), "settings.json"))
 
 			// The probes write as they finish rather than buffering the card, so
@@ -813,7 +816,7 @@ func doctorLine(w io.Writer, st term.Style, label, value string) {
 // writer so the report can be tested without a live bucket. Nothing here is
 // recorded in stats: doctor reads no artifacts, so counting it would inflate
 // `gain` with calls that saved nothing.
-func doctorLocal(w io.Writer, st term.Style, cacheDir string, cacheBytes int64, cacheFiles int) {
+func doctorLocal(w io.Writer, st term.Style, cacheDir string, cacheBytes int64, cacheFiles int, mcpScope claudecfg.Scope) {
 	doctorLine(w, st, "version", version)
 	cacheValue := cacheDir
 	if cacheFiles > 0 {
@@ -823,6 +826,13 @@ func doctorLocal(w io.Writer, st term.Style, cacheDir string, cacheBytes int64, 
 	doctorLine(w, st, "stats", fmt.Sprintf("%s (enabled=%v)", stats.Path(), stats.Enabled()))
 	doctorLine(w, st, "binary", binaryStatus())
 	doctorLine(w, st, "gh", ghStatus())
+	// ScopeNone means neither file names the server, which is the state a client
+	// with no tools in it is usually in.
+	mcpValue := "not registered (run: whyfail init --mcp)"
+	if mcpScope != claudecfg.ScopeNone {
+		mcpValue = "registered (" + string(mcpScope) + ")"
+	}
+	doctorLine(w, st, "mcp", mcpValue)
 }
 
 // binaryStatus names the whyfail on PATH and calls out when it is not the
