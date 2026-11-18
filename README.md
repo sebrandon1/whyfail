@@ -50,6 +50,17 @@ whyfail artifact <gcs-url>      # metadata and excerpt
 whyfail search '<regex>'        # how often has this error been seen?
 ```
 
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | the command ran, whatever it found |
+| 1 | the tool failed — bad URL, network error, timeout |
+| 2 | `run --exit-code`: the run did not pass |
+
+A failed run is a result, so it only changes the exit status when you ask for that
+with `--exit-code`; the digest still prints in full.
+
 ## Guides
 
 | Guide | Contents |
