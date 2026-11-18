@@ -10,7 +10,7 @@ whyfail run <prow-url | gs://bucket/path>   # digest one run
 whyfail job <job-name>                      # health over retained history
 whyfail pr <github-pr-url>                  # every failing check on the head commit
 whyfail failures <prow-url>                 # failed tests and steps only
-whyfail log <prow-url> <step> [--tail N]    # bounded build-log view
+whyfail log <prow-url> <step> [--tail N] [--grep RE]   # bounded build-log view
 whyfail artifact <gcs-url>                  # metadata and excerpt, or --list a prefix
 whyfail search <regex>                      # how often an error appears in CI
 whyfail gain                                # savings statistics
@@ -50,7 +50,9 @@ Command-specific flags:
 
 - `run` — `--no-history` (skip the job-health lookup), `--search` (look up the top
   failure signature on search.ci), `--no-sippy` (skip the Sippy coverage probe)
-- `log` — `--tail <n>` (trailing lines, default 120)
+- `log` — `--tail <n>` (trailing lines, default 120; with `--grep`, the maximum
+  matches printed), `--grep <regex>` (only matching lines, numbered), `--context <n>`
+  (lines of context around each match, merged so nothing prints twice)
 - `artifact` — `--list` (list a prefix instead of reading an object), `--limit <n>`
   (maximum objects to list, default 200; `0` = all)
 - `search` — `--max-age <dur>` (search window, default `48h`)

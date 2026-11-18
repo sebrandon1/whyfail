@@ -419,8 +419,10 @@ func repoOf(d *run.Digest, ref prow.Ref) string {
 
 func newLogCmd(g *globals) *cobra.Command {
 	var tail int
+	var grep string
+	var contextLines int
 	cmd := &cobra.Command{
-		Use:   "log <prow-url> <step> [--tail N]",
+		Use:   "log <prow-url> <step> [--tail N] [--grep RE] [--context N]",
 		Short: "Bounded view of a step's build log",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
@@ -429,6 +431,15 @@ func newLogCmd(g *globals) *cobra.Command {
 				return err
 			}
 			step := args[1]
+			// Compile before fetching: a typo in the pattern must not cost a
+			// network round trip.
+			var re *regexp.Regexp
+			if grep != "" {
+				re, err = regexp.Compile(grep)
+				if err != nil {
+					return fmt.Errorf("invalid --grep pattern: %w", err)
+				}
+			}
 			ctx, cancel := g.ctx()
 			defer cancel()
 			defer func() { err = g.timeoutError(cmd.CommandPath(), err) }()
@@ -440,14 +451,30 @@ func newLogCmd(g *globals) *cobra.Command {
 				return err
 			}
 			lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-			if tail > 0 && len(lines) > tail {
-				lines = lines[len(lines)-tail:]
+
+			var out string
+			printed := 0
+			if re != nil {
+				selected, total, kept := grepLog(lines, re, contextLines, tail)
+				printed = len(selected)
+				out = strings.Join(selected, "\n")
+				if out != "" {
+					out += "\n"
+				}
+				if further := total - kept; further > 0 {
+					out += fmt.Sprintf("… %d further matches\n", further)
+				}
+			} else {
+				if tail > 0 && len(lines) > tail {
+					lines = lines[len(lines)-tail:]
+				}
+				out = strings.Join(lines, "\n") + "\n"
+				printed = len(lines)
 			}
-			out := strings.Join(lines, "\n") + "\n"
 
 			var buf bytes.Buffer
 			if g.jsonOut {
-				writeJSON(&buf, logOut{Schema: api.SchemaV1, Artifact: target, Lines: len(lines), Text: out})
+				writeJSON(&buf, logOut{Schema: api.SchemaV1, Artifact: target, Lines: printed, Text: out})
 			} else {
 				buf.WriteString(out)
 			}
@@ -455,8 +482,54 @@ func newLogCmd(g *globals) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&tail, "tail", 120, "number of trailing lines")
+	cmd.Flags().IntVar(&tail, "tail", 120, "number of trailing lines (or matches, with --grep)")
+	cmd.Flags().StringVar(&grep, "grep", "", "print only lines matching this regular expression")
+	cmd.Flags().IntVar(&contextLines, "context", 0, "lines of context around each --grep match")
 	return cmd
+}
+
+// grepLog selects the lines matching re, expands each by context lines on either
+// side, merges overlapping windows so no line prints twice, and numbers what it
+// keeps. limit caps the matches considered (0 means no limit); kept is how many
+// of total matches survived that cap, so the caller can say what it dropped.
+func grepLog(lines []string, re *regexp.Regexp, context, limit int) (out []string, total, kept int) {
+	var matches []int
+	for i, l := range lines {
+		if re.MatchString(l) {
+			matches = append(matches, i)
+		}
+	}
+	total = len(matches)
+	if limit > 0 && len(matches) > limit {
+		matches = matches[:limit]
+	}
+	kept = len(matches)
+
+	var keep []int
+	for _, i := range matches {
+		lo, hi := i-context, i+context
+		if lo < 0 {
+			lo = 0
+		}
+		if hi >= len(lines) {
+			hi = len(lines) - 1
+		}
+		if n := len(keep); n > 0 && lo <= keep[n-1]+1 {
+			// Overlapping or adjacent window: extend it rather than repeat it.
+			for j := keep[n-1] + 1; j <= hi; j++ {
+				keep = append(keep, j)
+			}
+			continue
+		}
+		for j := lo; j <= hi; j++ {
+			keep = append(keep, j)
+		}
+	}
+	out = make([]string, len(keep))
+	for i, n := range keep {
+		out[i] = fmt.Sprintf("%5d  %s", n+1, lines[n])
+	}
+	return out, total, kept
 }
 
 // maxLogBytes caps how much of a build log is read, so a huge log cannot fill
