@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sebrandon1/whyfail/internal/gcs"
 	"github.com/sebrandon1/whyfail/internal/health"
@@ -236,6 +237,55 @@ func TestBuildHistoryUsesIndex(t *testing.T) {
 	}
 	if d.Job.Health.Runs != 1 || d.Job.Health.Pass != 1 {
 		t.Fatalf("health: %+v", d.Job.Health)
+	}
+}
+
+// --window reaches the embedded job block. Without it the whole retained
+// history is summarised; with it, only the runs inside the window.
+func TestBuildHistoryHonoursWindow(t *testing.T) {
+	const (
+		base = "pr-logs/pull/org_repo/2364/job/2123/"
+		job  = "job"
+	)
+	newest := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
+	older := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
+	finished := func(result string, at time.Time) string {
+		return fmt.Sprintf(`{"result":%q,"timestamp":%d}`, result, at.Unix())
+	}
+	objects := map[string]string{
+		base + "finished.json": finished("SUCCESS", newest),
+		// A second, older run of the same job, reachable only through the index.
+		"pr-logs/pull/org_repo/2364/job/2000/finished.json": finished("FAILURE", older),
+		"pr-logs/directory/" + job + "/2123.txt":            "gs://bkt/" + strings.TrimSuffix(base, "/"),
+		"pr-logs/directory/" + job + "/2000.txt":            "gs://bkt/pr-logs/pull/org_repo/2364/job/2000",
+		"pr-logs/directory/" + job + "/latest-build.txt":    "2123",
+	}
+	ref := prow.Ref{Bucket: "bkt", ObjectPath: strings.TrimSuffix(base, "/"), Job: job, RunID: "2123"}
+
+	all, err := Build(context.Background(), fakeGCS(t, objects), ref, Options{History: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.Job == nil || all.Job.Health == nil {
+		t.Fatal("expected a health summary")
+	}
+	if all.Job.Health.Runs != 2 || all.Job.Health.Fail != 1 {
+		t.Fatalf("all history: %+v", all.Job.Health)
+	}
+
+	windowed, err := Build(context.Background(), fakeGCS(t, objects), ref,
+		Options{History: true, Window: 24 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if windowed.Job == nil || windowed.Job.Health == nil {
+		t.Fatal("expected a health summary")
+	}
+	if windowed.Job.Health.Runs != 1 || windowed.Job.Health.Fail != 0 {
+		t.Fatalf("windowed history: %+v", windowed.Job.Health)
+	}
+	if !windowed.Job.Health.From.Equal(newest.Add(-24 * time.Hour)) {
+		t.Errorf("from = %v, want the window's start", windowed.Job.Health.From)
 	}
 }
 

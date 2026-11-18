@@ -21,6 +21,11 @@ The digest uses structured sources first:
 Monitor failures are collapsed by cause, so "76 failures" becomes "8 causes" with
 the dominant one first.
 
+The embedded `job` block is the job's health, and it is bounded by the global
+`--window`: `whyfail run <url> --window 24h` summarises the last day, while
+`whyfail job` without `--window` covers everything retained. `--no-history` drops
+the block entirely.
+
 A digest is bounded: long errors are cut to two lines and paths are shortened from
 the middle. `--json` and `whyfail log` carry the rest, so a digest never pulls a
 multi-megabyte artifact into a conversation. See
