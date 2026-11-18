@@ -269,7 +269,7 @@ func newRunCmd(g *globals) *cobra.Command {
 			c := newClient(g)
 			start := time.Now()
 
-			d, err := run.Build(ctx, c, ref, run.Options{History: !noHistory})
+			d, err := run.Build(ctx, c, ref, run.Options{History: !noHistory, Window: g.window})
 			if err != nil {
 				return err
 			}
@@ -1258,7 +1258,7 @@ func mcpCall(g *globals, name string, args map[string]any) (text string, err err
 		if err != nil {
 			return "", err
 		}
-		d, err := run.Build(ctx, c, ref, run.Options{History: true})
+		d, err := run.Build(ctx, c, ref, run.Options{History: true, Window: g.window})
 		if err != nil {
 			return "", err
 		}

@@ -188,6 +188,9 @@ type SearchSig struct {
 type Options struct {
 	History       bool
 	BuildLogLimit int64
+	// Window bounds the embedded job health, relative to the newest run. Zero
+	// means all retained history, which is what `job` shows by default.
+	Window time.Duration
 }
 
 // Build assembles a digest for ref.
@@ -244,7 +247,7 @@ func Build(ctx context.Context, c *gcs.Client, ref prow.Ref, opts Options) (*Dig
 
 	d.Job = &JobInfo{Name: run.JobName, Type: run.Type}
 	if opts.History {
-		switch sum, err := health.Collect(ctx, c, ref.Bucket, run.JobName, 0); {
+		switch sum, err := health.Collect(ctx, c, ref.Bucket, run.JobName, opts.Window); {
 		case err == nil:
 			d.Job.Health = sum
 		case errors.Is(err, health.ErrJobNotFound):
