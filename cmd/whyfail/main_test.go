@@ -110,7 +110,7 @@ func TestStringField(t *testing.T) {
 // fakeGH answers gh api requests from a fixed endpoint map.
 func fakeGH(t *testing.T, pages map[string]string) ghAPI {
 	t.Helper()
-	return func(endpoint string, paginate bool) ([]byte, error) {
+	return func(_ context.Context, endpoint string, paginate bool) ([]byte, error) {
 		if !paginate {
 			t.Errorf("%s: want a paginated request", endpoint)
 		}
@@ -119,6 +119,70 @@ func fakeGH(t *testing.T, pages map[string]string) ghAPI {
 			t.Fatalf("unexpected endpoint %q", endpoint)
 		}
 		return []byte(body), nil
+	}
+}
+
+// fakeGHScript puts an executable `gh` that runs body under /bin/sh on PATH for
+// the rest of the test, so execGH's real process handling is what gets tested.
+func fakeGHScript(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// --timeout must bound the one command that leaves the process: a hung `gh`
+// used to hold pr open with no recourse for an agent waiting on it.
+func TestExecGHHonoursContext(t *testing.T) {
+	// exec, not a plain child: a shell that leaves `sleep` behind keeps the
+	// stdout pipe open, so Output would wait for the grandchild even after the
+	// kill. A real gh is one process, and the shim should be too.
+	fakeGHScript(t, "exec sleep 5")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := execGH(ctx, "repos/org/repo/pulls/1", false)
+	if err == nil {
+		t.Fatal("want an error from a gh that never returns")
+	}
+	// The kill surfaces as "signal: killed"; the friendly message must survive.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("took %v: the context did not kill gh", elapsed)
+	}
+}
+
+// A gh that answers is handed back untouched, and ghJSON decodes it.
+func TestExecGHReturnsOutput(t *testing.T) {
+	fakeGHScript(t, `echo '{"title":"hello"}'`)
+
+	out, err := execGH(context.Background(), "repos/org/repo/pulls/1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "hello") {
+		t.Errorf("out = %q, want gh's stdout", out)
+	}
+	m, err := ghJSON(context.Background(), "repos/org/repo/pulls/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m["title"]; got != "hello" {
+		t.Errorf("title = %v, want hello", got)
+	}
+}
+
+// Output that is not JSON is an error, not a half-filled map.
+func TestGHJSONRejectsNonJSON(t *testing.T) {
+	fakeGHScript(t, "echo 'not json'")
+
+	if _, err := ghJSON(context.Background(), "repos/org/repo/pulls/1"); err == nil {
+		t.Fatal("want a decode error")
 	}
 }
 
