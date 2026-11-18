@@ -864,7 +864,7 @@ func newPRCmd(g *globals) *cobra.Command {
 			c := newClient(g)
 			start := time.Now()
 
-			meta, err := ghJSON("repos/" + org + "/" + repo + "/pulls/" + num)
+			meta, err := ghJSON(ctx, "repos/"+org+"/"+repo+"/pulls/"+num)
 			if err != nil {
 				return err
 			}
@@ -940,7 +940,7 @@ func failingCheckRun(r checkRun) bool {
 func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org, repo, branch, sha string, window time.Duration) ([]render.PRCard, string, error) {
 	base := "repos/" + org + "/" + repo + "/commits/" + sha
 
-	statusRaw, err := api(base+"/statuses?per_page=100", true)
+	statusRaw, err := api(ctx, base+"/statuses?per_page=100", true)
 	if err != nil {
 		return nil, "", err
 	}
@@ -948,7 +948,7 @@ func collectPRChecks(ctx context.Context, api ghAPI, c *gcs.Client, bucket, org,
 	if err != nil {
 		return nil, "", fmt.Errorf("decode commit statuses: %w", err)
 	}
-	runsRaw, err := api(base+"/check-runs?per_page=100&filter=latest", true)
+	runsRaw, err := api(ctx, base+"/check-runs?per_page=100&filter=latest", true)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1074,27 +1074,37 @@ func decodeCheckRunPages(b []byte) ([]checkRun, error) {
 
 // ghAPI is one `gh api` request. paginate follows the Link header and returns
 // every page's JSON array concatenated, which is what the checks endpoints need.
-type ghAPI func(endpoint string, paginate bool) ([]byte, error)
+// It takes the command's context so a hung `gh` is killed by --timeout like
+// every in-process request.
+type ghAPI func(ctx context.Context, endpoint string, paginate bool) ([]byte, error)
 
 // execGH runs `gh api`. Its signature satisfies ghAPI, so callers that want to
 // be testable take a ghAPI and tests pass a canned one.
-func execGH(endpoint string, paginate bool) ([]byte, error) {
+func execGH(ctx context.Context, endpoint string, paginate bool) ([]byte, error) {
 	args := []string{"api"}
 	if paginate {
 		args = append(args, "--paginate")
 	}
 	args = append(args, endpoint)
-	out, err := exec.Command("gh", args...).Output()
+	out, err := exec.CommandContext(ctx, "gh", args...).Output()
 	if err != nil {
+		// A process killed on the deadline reports "signal: killed", which would
+		// hide the reason. Report the context's own error instead, so
+		// errors.Is(err, context.DeadlineExceeded) still holds.
+		if cerr := ctx.Err(); cerr != nil {
+			err = cerr
+		}
 		return nil, fmt.Errorf("gh api %s: %w", endpoint, err)
 	}
 	return out, nil
 }
 
-func ghGet(endpoint string) ([]byte, error) { return execGH(endpoint, false) }
+func ghGet(ctx context.Context, endpoint string) ([]byte, error) {
+	return execGH(ctx, endpoint, false)
+}
 
-func ghJSON(endpoint string) (map[string]any, error) {
-	out, err := ghGet(endpoint)
+func ghJSON(ctx context.Context, endpoint string) (map[string]any, error) {
+	out, err := ghGet(ctx, endpoint)
 	if err != nil {
 		return nil, err
 	}
