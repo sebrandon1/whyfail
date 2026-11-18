@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -184,6 +185,69 @@ func TestGHJSONRejectsNonJSON(t *testing.T) {
 
 	if _, err := ghJSON(context.Background(), "repos/org/repo/pulls/1"); err == nil {
 		t.Fatal("want a decode error")
+	}
+}
+
+// --grep is a filter over what was already fetched: it selects matching lines,
+// numbers them, and expands them by context without printing a line twice.
+func TestLogGrep(t *testing.T) {
+	lines := []string{
+		"starting",       // 1
+		"tls: bad",       // 2
+		"unrelated",      // 3
+		"certificate x",  // 4
+		"done",           // 5
+		"tls: bad again", // 6
+		"tail",           // 7
+	}
+
+	// One match, one line of context each side, numbered from the original.
+	out, total, kept := grepLog(lines, regexp.MustCompile("certificate"), 1, 0)
+	if total != 1 || kept != 1 {
+		t.Fatalf("total, kept = %d, %d, want 1, 1", total, kept)
+	}
+	want := []string{"    3  unrelated", "    4  certificate x", "    5  done"}
+	if strings.Join(out, "\n") != strings.Join(want, "\n") {
+		t.Errorf("out =\n%s\nwant\n%s", strings.Join(out, "\n"), strings.Join(want, "\n"))
+	}
+
+	// Two windows that do not touch print both, in file order.
+	out, _, _ = grepLog(lines, regexp.MustCompile("tls"), 0, 0)
+	if len(out) != 2 || !strings.Contains(out[0], "tls: bad") || !strings.Contains(out[1], "again") {
+		t.Errorf("out = %v, want the two matches", out)
+	}
+
+	// Adjacent windows merge: with context 2 the two matches cover 1-7 and no
+	// line appears twice.
+	out, _, _ = grepLog(lines, regexp.MustCompile("tls"), 2, 0)
+	if len(out) != 7 {
+		t.Fatalf("merged output has %d lines, want 7:\n%s", len(out), strings.Join(out, "\n"))
+	}
+	seen := map[string]bool{}
+	for _, l := range out {
+		if seen[l] {
+			t.Errorf("line printed twice: %q", l)
+		}
+		seen[l] = true
+	}
+
+	// The cap limits how many matches are expanded, and reports the rest.
+	out, total, kept = grepLog(lines, regexp.MustCompile("tls"), 0, 1)
+	if total != 2 || kept != 1 {
+		t.Errorf("total, kept = %d, %d, want 2, 1", total, kept)
+	}
+	if len(out) != 1 || !strings.Contains(out[0], "tls: bad") {
+		t.Errorf("out = %v, want just the first match", out)
+	}
+
+	// No match is an empty selection, not an error.
+	if out, total, _ := grepLog(lines, regexp.MustCompile("nope"), 3, 0); len(out) != 0 || total != 0 {
+		t.Errorf("no match: out = %v, total = %d", out, total)
+	}
+
+	// A pattern is matched against the raw line, so numbering cannot affect it.
+	if _, total, _ := grepLog(lines, regexp.MustCompile("^ *1 "), 0, 0); total != 0 {
+		t.Errorf("matched a line number: total = %d", total)
 	}
 }
 
