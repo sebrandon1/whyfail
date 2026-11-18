@@ -1,0 +1,18 @@
+# Jobs on the daily board, one per line. `whyfail report` reads this file; the
+# Pages workflow runs it every morning. Names are presubmit jobs in
+# pr-logs/directory/ of test-platform-results-public.
+#
+# The board is curated on purpose: the directory holds thousands of jobs across
+# all of OpenShift CI, and a full walk costs many list requests per day for rows
+# nobody reads. Add the jobs your team actually retests.
+
+pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename
+pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel
+pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial
+pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow
+pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow
+pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow
+pull-ci-rh-ecosystem-edge-recert-main-images
+pull-ci-rh-ecosystem-edge-recert-main-cargo-check
+pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy
+pull-ci-rh-ecosystem-edge-recert-main-cargo-test

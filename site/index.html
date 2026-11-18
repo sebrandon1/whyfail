@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>whyfail · flaky Prow jobs</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23a15c00'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Flaky Prow jobs</h1>
+  <p class="sub" id="meta">Loading…</p>
+  <div class="chips" id="chips"></div>
+</header>
+
+<main>
+  <label class="search">
+    <span>Filter</span>
+    <input id="filter" type="search" placeholder="job or repository" autocomplete="off">
+  </label>
+
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Job</th>
+        <th scope="col">Repo</th>
+        <th scope="col">Verdict</th>
+        <th scope="col" class="num">Pass rate</th>
+        <th scope="col" class="num">Recent</th>
+        <th scope="col" class="num">Runs</th>
+        <th scope="col" class="num">Fail streak</th>
+        <th scope="col" class="num">PRs failing</th>
+        <th scope="col">Trend</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="empty" id="empty" hidden>No job matches that filter.</p>
+</main>
+
+<footer>
+  <p>
+    Every verdict is computed by <a href="https://github.com/sebrandon1/whyfail">whyfail</a>
+    from public <code>test-platform-results-public</code> history. Refresh is daily.
+  </p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

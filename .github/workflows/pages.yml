@@ -1,0 +1,85 @@
+name: pages
+
+# Publishes the curated flaky-job board. It runs daily, can be triggered by hand,
+# and is the only thing that writes to the gh-pages branch.
+on:
+  schedule:
+    # Off the hour: every workflow in the estate wants 05:00, and this one is not
+    # in a hurry.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build whyfail
+        run: go build -o "$RUNNER_TEMP/whyfail" ./cmd/whyfail
+
+      - name: Restore the published history
+        run: |
+          mkdir -p "$RUNNER_TEMP/site"
+          # The trend is the whole point, so today's point is merged into what is
+          # already published rather than starting from nothing.
+          if git fetch --depth=1 origin gh-pages 2>/dev/null; then
+            git show origin/gh-pages:history.json > "$RUNNER_TEMP/site/history.json" 2>/dev/null || true
+          fi
+
+      - name: Take the snapshot
+        run: |
+          "$RUNNER_TEMP/whyfail" report \
+            --jobs report/jobs.txt \
+            --window 720h \
+            --out "$RUNNER_TEMP/site/snapshot.json" \
+            --history "$RUNNER_TEMP/site/history.json"
+
+      - name: Refuse an empty or all-unknown board
+        run: |
+          python3 - "$RUNNER_TEMP/site/snapshot.json" <<'PY'
+          import json
+          import sys
+
+          doc = json.load(open(sys.argv[1]))
+          jobs = doc.get("jobs") or []
+          if not jobs:
+              sys.exit("snapshot has no jobs")
+          errors = [j for j in jobs if j.get("error")]
+          if errors:
+              sys.exit(f"{len(errors)} job lookups failed: {errors[0]['job']}: {errors[0]['error']}")
+          judged = [j for j in jobs if j.get("verdict") != "UNKNOWN"]
+          if not judged:
+              sys.exit("every job is UNKNOWN: the bucket or the job list is wrong")
+          print(f"{len(judged)} of {len(jobs)} jobs have a verdict")
+          PY
+
+      - name: Publish to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp site/index.html site/app.js site/style.css "$RUNNER_TEMP/site/"
+          cd "$RUNNER_TEMP/site"
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b gh-pages
+          git add -A
+          git commit -q -m "pages: snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin gh-pages

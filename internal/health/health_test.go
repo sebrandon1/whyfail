@@ -426,3 +426,28 @@ func TestSummarizeFailingPRs(t *testing.T) {
 		t.Errorf("healthy job listed %v", healthy.FailingPRs)
 	}
 }
+
+// The repository comes from the run paths, and only when they are PR paths: a
+// periodic job has no repository, and an underscore is what separates org from
+// repo.
+func TestSummaryRepo(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths []string
+		want  string
+	}{
+		{"pr run", []string{"pr-logs/pull/rh-ecosystem-edge_recert/2364/job/9"}, "rh-ecosystem-edge/recert"},
+		{"mixed", []string{"logs/periodic-x/1", "pr-logs/pull/org_repo/2/job/3"}, "org/repo"},
+		{"periodic only", []string{"logs/pull-ci-org-repo-main-unit/123"}, ""},
+		{"empty", nil, ""},
+	}
+	for _, c := range cases {
+		s := &Summary{}
+		for _, p := range c.paths {
+			s.Samples = append(s.Samples, RunResult{Path: p})
+		}
+		if got := s.Repo(); got != c.want {
+			t.Errorf("%s: Repo = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
