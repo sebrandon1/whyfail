@@ -97,12 +97,12 @@ func (s *Summary) Repo() string {
 // Collect enumerates a job's runs and summarizes them. window <= 0 means the
 // full retained history.
 func Collect(ctx context.Context, c *gcs.Client, bucket, job string, window time.Duration) (*Summary, error) {
-	paths, err := enumerate(ctx, c, bucket, job)
+	paths, err := enumerate(ctx, c, bucket, job, window)
 	if err != nil {
 		return nil, err
 	}
-	// A window that only narrows the arithmetic still pays for every run's
-	// finished.json. Drop the entries that cannot land inside it first.
+	// The index pre-filter already dropped entries outside the window; this
+	// stays as the safety net for layouts whose listing carried no timestamp.
 	paths = recentOnly(paths, window)
 
 	// Each goroutine writes its own slot, so the results are ordered by run
@@ -143,48 +143,67 @@ type runPath struct {
 	Updated time.Time
 }
 
-// recentOnly drops index entries that cannot fall inside the window, so a
-// windowed lookup does not fetch finished.json for runs it will discard. The
-// reference point is the newest entry, matching summarize, and entries without
-// a timestamp are kept: some layouts do not report one, and dropping them would
-// silently empty the summary.
+// indexEntry is one presubmit run as the directory listing reported it, before
+// its .txt object is resolved to a run path.
+type indexEntry struct {
+	id      string
+	name    string
+	updated time.Time
+}
+
+// recentOnly drops run paths that cannot fall inside the window, so a windowed
+// lookup does not fetch finished.json for runs it will discard.
 func recentOnly(paths []runPath, window time.Duration) []runPath {
-	if window <= 0 || len(paths) == 0 {
-		return paths
+	return dropOutsideWindow(paths, func(p runPath) time.Time { return p.Updated }, window)
+}
+
+// recentEntries drops presubmit index entries that cannot fall inside the
+// window before they are resolved, so a windowed lookup does not spend an
+// index GET on every retained run. The listing already carries `updated`, and
+// it is the same reference point recentOnly uses.
+func recentEntries(entries []indexEntry, window time.Duration) []indexEntry {
+	return dropOutsideWindow(entries, func(e indexEntry) time.Time { return e.updated }, window)
+}
+
+// dropOutsideWindow keeps only items whose timestamp is inside the window,
+// with pruneGrace of slack. The reference point is the newest item rather than
+// wall-clock now, so a job that stopped running still summarizes its last
+// window. window <= 0, a set with no timestamps and any item without one are
+// all left alone: some layouts report no `updated`, and dropping those would
+// silently empty the summary.
+func dropOutsideWindow[T any](items []T, updated func(T) time.Time, window time.Duration) []T {
+	if window <= 0 || len(items) == 0 {
+		return items
 	}
 	var newest time.Time
-	for _, p := range paths {
-		if p.Updated.After(newest) {
-			newest = p.Updated
+	for _, it := range items {
+		if t := updated(it); t.After(newest) {
+			newest = t
 		}
 	}
 	if newest.IsZero() {
-		return paths
+		return items
 	}
 	cutoff := newest.Add(-window - pruneGrace)
-	out := paths[:0]
-	for _, p := range paths {
-		if !p.Updated.IsZero() && p.Updated.Before(cutoff) {
+	out := items[:0]
+	for _, it := range items {
+		if t := updated(it); !t.IsZero() && t.Before(cutoff) {
 			continue
 		}
-		out = append(out, p)
+		out = append(out, it)
 	}
 	return out
 }
 
-func enumerate(ctx context.Context, c *gcs.Client, bucket, job string) ([]runPath, error) {
+func enumerate(ctx context.Context, c *gcs.Client, bucket, job string, window time.Duration) ([]runPath, error) {
 	// Presubmits are indexed as one tiny .txt per run.
 	objs, err := c.List(ctx, bucket, "pr-logs/directory/"+job+"/")
 	if err != nil {
 		return nil, err
 	}
-	// Collect the index entries first, then resolve them in parallel: one
-	// sequential GET per retained run is the cold-start cost of this command.
-	type indexEntry struct {
-		id      string
-		name    string
-		updated time.Time
-	}
+	// Collect the index entries first, then resolve the ones inside the window
+	// in parallel: one sequential GET per retained run is the cold-start cost
+	// of this command.
 	var entries []indexEntry
 	for _, o := range objs {
 		name := o.Name
@@ -198,6 +217,7 @@ func enumerate(ctx context.Context, c *gcs.Client, bucket, job string) ([]runPat
 		updated, _ := time.Parse(time.RFC3339, o.Updated)
 		entries = append(entries, indexEntry{id: id, name: name, updated: updated})
 	}
+	entries = recentEntries(entries, window)
 
 	paths := make([]string, len(entries))
 	err = parallel.Do(len(entries), fanOut, func(i int) error {

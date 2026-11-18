@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -293,6 +294,18 @@ func TestRecentOnly(t *testing.T) {
 	if len(kept) != 2 || kept[0].ID != "periodic" || kept[1].ID != "new" {
 		t.Fatalf("mixed = %+v", kept)
 	}
+
+	// The cutoff is inclusive, matching summarize's lower bound: an entry
+	// exactly window+grace behind the newest is kept, one hour earlier is not.
+	edge := []runPath{
+		{ID: "before", Updated: at(163)},
+		{ID: "at", Updated: at(164)},
+		{ID: "newest", Updated: at(200)},
+	}
+	kept = recentOnly(edge, 24*time.Hour)
+	if len(kept) != 2 || kept[0].ID != "at" || kept[1].ID != "newest" {
+		t.Fatalf("boundary = %+v", kept)
+	}
 }
 
 func TestCollectWindowPrunesFetch(t *testing.T) {
@@ -325,6 +338,89 @@ func TestCollectWindowPrunesFetch(t *testing.T) {
 	}
 	if s.Pass != 3 {
 		t.Fatalf("pass = %d", s.Pass)
+	}
+}
+
+// recordingRT records object GETs so a test can assert on the requests a
+// windowed lookup makes; listings are left out because they are not per-run.
+type recordingRT struct {
+	inner http.RoundTripper
+	mu    sync.Mutex
+	gets  []string
+}
+
+func (r *recordingRT) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodGet && !strings.HasPrefix(req.URL.Path, "/storage/v1/") {
+		key := strings.TrimPrefix(strings.TrimPrefix(req.URL.Path, "/"), "bkt/")
+		r.mu.Lock()
+		r.gets = append(r.gets, key)
+		r.mu.Unlock()
+	}
+	return r.inner.RoundTrip(req)
+}
+
+func (r *recordingRT) requested(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, g := range r.gets {
+		if g == key {
+			return true
+		}
+	}
+	return false
+}
+
+// A windowed Collect must decide which index entries to resolve from the
+// listing's `updated`, not by resolving each one and discarding it afterwards:
+// every skipped entry is a saved request. An entry with no timestamp is still
+// resolved, because dropping it could silently empty the summary.
+func TestCollectWindowPrefiltersIndexRequests(t *testing.T) {
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	objects := map[string]string{
+		"pr-logs/directory/job/100.txt":            "gs://bkt/pr-logs/pull/o_r/1/job/100",
+		"pr-logs/directory/job/101.txt":            "gs://bkt/pr-logs/pull/o_r/1/job/101",
+		"pr-logs/directory/job/102.txt":            "gs://bkt/pr-logs/pull/o_r/1/job/102",
+		"pr-logs/directory/job/103.txt":            "gs://bkt/pr-logs/pull/o_r/1/job/103",
+		"pr-logs/pull/o_r/1/job/101/finished.json": `{"result":"SUCCESS"}`,
+		"pr-logs/pull/o_r/1/job/102/finished.json": `{"result":"FAILURE"}`,
+		"pr-logs/pull/o_r/1/job/103/finished.json": `{"result":"SUCCESS"}`,
+	}
+	// 100 is two days behind the newest entry and cannot land in a 24h
+	// window; 101 and 102 are inside it; 103 reports no timestamp.
+	updated := map[string]time.Time{
+		"100.txt": base,
+		"101.txt": base.Add(26 * time.Hour),
+		"102.txt": base.Add(48 * time.Hour),
+	}
+	c := fakeClientAt(t, objects, nil, func(name string) time.Time {
+		return updated[baseName(name)]
+	})
+	rec := &recordingRT{inner: c.HTTP.Transport}
+	c.HTTP = &http.Client{Transport: rec}
+
+	s, err := Collect(context.Background(), c, "bkt", "job", 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pruned := range []string{"pr-logs/directory/job/100.txt", "pr-logs/pull/o_r/1/job/100/finished.json"} {
+		if rec.requested(pruned) {
+			t.Errorf("fetched %s, which cannot fall inside the window", pruned)
+		}
+	}
+	for _, kept := range []string{
+		"pr-logs/directory/job/101.txt",
+		"pr-logs/directory/job/102.txt",
+		"pr-logs/directory/job/103.txt",
+	} {
+
+		if !rec.requested(kept) {
+			t.Errorf("did not resolve %s, which is inside the window", kept)
+		}
+	}
+	// The summary is the same one an unfiltered run produces: 103 carries no
+	// timestamp, so only 101 and 102 land inside the 24h arithmetic window.
+	if s.Runs != 2 || s.Pass != 1 || s.Fail != 1 {
+		t.Fatalf("summary: %+v", s)
 	}
 }
 
