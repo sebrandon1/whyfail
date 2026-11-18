@@ -251,6 +251,26 @@ func TestLogGrep(t *testing.T) {
 	}
 }
 
+// A failed run is a result, not a tool error: it must be distinguishable in the
+// exit status without printing anything, and wrapped sentinels still count.
+func TestExitStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"success", nil, 0},
+		{"run failed", errRunFailed, 2},
+		{"wrapped run failed", fmt.Errorf("run: %w", errRunFailed), 2},
+		{"tool error", errors.New("boom"), 1},
+	}
+	for _, c := range cases {
+		if got := exitStatus(c.err); got != c.want {
+			t.Errorf("%s: exitStatus = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
 func TestCollectPRChecks(t *testing.T) {
 	const (
 		sha      = "abc123"

@@ -89,8 +89,29 @@ func main() {
 		newInitCmd(g),
 	)
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "whyfail:", err)
-		os.Exit(1)
+		// A run that failed under --exit-code is a result, not a tool error: it
+		// exits 2 and prints nothing extra, so the digest stays the whole story.
+		if !errors.Is(err, errRunFailed) {
+			fmt.Fprintln(os.Stderr, "whyfail:", err)
+		}
+		os.Exit(exitStatus(err))
+	}
+}
+
+// errRunFailed reports that the run the caller asked about did not pass. It is a
+// sentinel so the exit status can be decided without inspecting messages.
+var errRunFailed = errors.New("run failed")
+
+// exitStatus maps a command error to the process exit status: 0 for success, 2
+// for a run that failed under --exit-code, 1 for every tool error.
+func exitStatus(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, errRunFailed):
+		return 2
+	default:
+		return 1
 	}
 }
 
@@ -253,7 +274,7 @@ func writeJSON(buf *bytes.Buffer, v any) {
 
 func newRunCmd(g *globals) *cobra.Command {
 	var noHistory, search bool
-	var noSippy bool
+	var noSippy, exitOnFailure bool
 	cmd := &cobra.Command{
 		Use:   "run <prow-url | gs://bucket/path>",
 		Short: "Digest a single Prow job run",
@@ -304,12 +325,18 @@ func newRunCmd(g *globals) *cobra.Command {
 				rec.PassRate = d.Job.Health.PassRate
 			}
 			g.emit(&buf, rec, c, start)
+			// Opt-in: the default stays exit 0, because the command is also read
+			// interactively and by pipelines that do not expect a failure code.
+			if exitOnFailure && d.Run != nil && d.Run.Result != "SUCCESS" {
+				return errRunFailed
+			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "skip job history (faster)")
 	cmd.Flags().BoolVar(&search, "search", false, "look up the top failure signature on search.ci")
 	cmd.Flags().BoolVar(&noSippy, "no-sippy", false, "skip the Sippy coverage probe")
+	cmd.Flags().BoolVar(&exitOnFailure, "exit-code", false, "exit 2 if the run did not pass")
 	return cmd
 }
 
