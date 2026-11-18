@@ -73,6 +73,7 @@ would rather call a function than be handed a rewritten shell command:
 |---|---|---|
 | `prow_run` | `url` — a Prow view URL or `gs://` reference | the run digest |
 | `prow_job` | `job` — a job name | health over retained history |
+| `prow_pr` | `pr` — a GitHub PR URL | every failing check on the head commit, with job health (needs `gh`) |
 
 Register it with `whyfail init --mcp`, or by hand:
 

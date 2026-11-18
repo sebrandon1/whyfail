@@ -113,7 +113,8 @@ func TestStringField(t *testing.T) {
 func fakeGH(t *testing.T, pages map[string]string) ghAPI {
 	t.Helper()
 	return func(_ context.Context, endpoint string, paginate bool) ([]byte, error) {
-		if !paginate {
+		// The checks endpoints are paginated; the pull-request lookup is not.
+		if !paginate && strings.Contains(endpoint, "?") {
 			t.Errorf("%s: want a paginated request", endpoint)
 		}
 		body, ok := pages[endpoint]
@@ -268,6 +269,51 @@ func TestExitStatus(t *testing.T) {
 		if got := exitStatus(c.err); got != c.want {
 			t.Errorf("%s: exitStatus = %d, want %d", c.name, got, c.want)
 		}
+	}
+}
+
+// The MCP tool and the CLI share this path, so it must produce the same
+// document `whyfail pr --json` prints.
+func TestBuildPRReport(t *testing.T) {
+	const (
+		sha   = "abc123"
+		prURL = "https://github.com/org/repo/pull/1"
+		base  = "repos/org/repo/commits/" + sha
+	)
+	pages := map[string]string{
+		"repos/org/repo/pulls/1":                        `{"title":"a change","head":{"sha":"abc123"},"base":{"ref":"main"}}`,
+		base + "/statuses?per_page=100":                 `[{"context":"ci/prow/e2e-aws","state":"failure"}]`,
+		base + "/check-runs?per_page=100&filter=latest": `{"check_runs":[]}`,
+	}
+	doc, err := buildPRReport(context.Background(), &globals{bucket: gcstest.Bucket},
+		gcstest.Client(t, &gcstest.Dataset{Objects: map[string][]byte{}}), fakeGH(t, pages), prURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Schema != api.SchemaV1 || doc.PR != prURL || doc.Title != "a change" || doc.SHA != sha {
+		t.Errorf("document = %+v", doc)
+	}
+	if doc.Warning != "" {
+		t.Errorf("warning = %q, want none", doc.Warning)
+	}
+	if len(doc.Failing) != 1 {
+		t.Fatalf("failing = %+v, want one card", doc.Failing)
+	}
+	if got := doc.Failing[0].Job; got != "pull-ci-org-repo-main-e2e-aws" {
+		t.Errorf("synthesised job = %q", got)
+	}
+
+	// A URL that is not a PR fails before any request is made.
+	if _, err := buildPRReport(context.Background(), &globals{}, gcstest.Client(t, &gcstest.Dataset{}),
+		fakeGH(t, nil), "https://github.com/org/repo"); err == nil {
+		t.Error("want an error for a non-PR URL")
+	}
+	// A pull request with no head SHA cannot be resolved; say so rather than
+	// asking for checks at an empty path.
+	empty := map[string]string{"repos/org/repo/pulls/2": `{"title":"x","head":{},"base":{"ref":"main"}}`}
+	if _, err := buildPRReport(context.Background(), &globals{bucket: gcstest.Bucket},
+		gcstest.Client(t, &gcstest.Dataset{}), fakeGH(t, empty), "https://github.com/org/repo/pull/2"); err == nil {
+		t.Error("want an error when the head SHA is missing")
 	}
 }
 
@@ -841,6 +887,7 @@ func TestMCPTarget(t *testing.T) {
 	}{
 		{"prow_run", map[string]any{"url": "https://prow/view/gs/bucket/pr-logs/pull/o_r/1/job/2"}, "https://prow/view/gs/bucket/pr-logs/pull/o_r/1/job/2"},
 		{"prow_job", map[string]any{"job": "pull-ci-o-r-main-unit"}, "pull-ci-o-r-main-unit"},
+		{"prow_pr", map[string]any{"pr": "https://github.com/org/repo/pull/7"}, "https://github.com/org/repo/pull/7"},
 		// A missing or mistyped argument leaves the target empty rather than
 		// inventing one, and an unknown tool has nothing to name.
 		{"prow_run", map[string]any{}, ""},
@@ -869,6 +916,8 @@ func TestMCPRepo(t *testing.T) {
 		{"prow_run", map[string]any{"url": "gs://b/logs/pull-ci-org-repo-main-unit/123"}, ""},
 		{"prow_run", map[string]any{"url": "not-a-prow-url"}, ""},
 		{"prow_job", map[string]any{"job": "pull-ci-org-repo-main-unit"}, ""},
+		{"prow_pr", map[string]any{"pr": "https://github.com/org/repo/pull/7"}, "org/repo"},
+		{"prow_pr", map[string]any{"pr": "not a url"}, ""},
 		{"other", map[string]any{"url": "gs://b/pr-logs/pull/org_repo/1/job/2"}, ""},
 	}
 	for _, c := range cases {
