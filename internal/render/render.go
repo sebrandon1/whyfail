@@ -90,6 +90,15 @@ func rowStyled(w io.Writer, st term.Style, name, value string, paint func(string
 	}
 }
 
+// prPreview lists the first few PRs a job is failing for and counts the rest:
+// enough to answer "is it mine, or everyone's" without a wall of names.
+func prPreview(prs []string, max int) string {
+	if len(prs) <= max {
+		return strings.Join(prs, ", ")
+	}
+	return strings.Join(prs[:max], ", ") + fmt.Sprintf(", … and %d more", len(prs)-max)
+}
+
 // fit truncates s so it fits on a labelled row.
 func fit(st term.Style, s string) string {
 	return term.Trunc(s, st.Width()-len(rowIndent))
@@ -595,7 +604,11 @@ func Job(w io.Writer, s *health.Summary, st term.Style) {
 		row(w, st, "LAST PASS", st.Dim("none in window"))
 	}
 	if s.DistinctPRs > 0 {
-		row(w, st, "FLAKY PRS", fmt.Sprintf("%d distinct %s failing", s.DistinctPRs, plural(s.DistinctPRs, "PR is", "PRs are")))
+		value := fmt.Sprintf("%d distinct %s failing", s.DistinctPRs, plural(s.DistinctPRs, "PR is", "PRs are"))
+		if len(s.FailingPRs) > 0 {
+			value += " · " + prPreview(s.FailingPRs, 3)
+		}
+		rowStyled(w, st, "FLAKY PRS", value, func(v string) string { return v })
 	}
 
 	var advice string

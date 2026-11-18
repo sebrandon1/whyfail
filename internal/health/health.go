@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -57,22 +58,25 @@ func (v Verdict) IsBad() bool {
 
 // Summary describes a job's history over the retained window.
 type Summary struct {
-	Schema         string      `json:"schema"`
-	Job            string      `json:"job"`
-	From           time.Time   `json:"from"`
-	To             time.Time   `json:"to"`
-	Runs           int         `json:"runs"`
-	Pass           int         `json:"pass"`
-	Fail           int         `json:"fail"`
-	Abort          int         `json:"abort"`
-	Missing        int         `json:"missing"`
-	PassRate       float64     `json:"pass_rate"`
-	RecentPassRate float64     `json:"recent_pass_rate"`
-	Streak         int         `json:"streak"`
-	LastPass       *time.Time  `json:"last_pass_at,omitempty"`
-	DistinctPRs    int         `json:"distinct_prs_failing"`
-	Verdict        Verdict     `json:"verdict"`
-	Samples        []RunResult `json:"-"`
+	Schema         string     `json:"schema"`
+	Job            string     `json:"job"`
+	From           time.Time  `json:"from"`
+	To             time.Time  `json:"to"`
+	Runs           int        `json:"runs"`
+	Pass           int        `json:"pass"`
+	Fail           int        `json:"fail"`
+	Abort          int        `json:"abort"`
+	Missing        int        `json:"missing"`
+	PassRate       float64    `json:"pass_rate"`
+	RecentPassRate float64    `json:"recent_pass_rate"`
+	Streak         int        `json:"streak"`
+	LastPass       *time.Time `json:"last_pass_at,omitempty"`
+	DistinctPRs    int        `json:"distinct_prs_failing"`
+	// FailingPRs names the PRs behind DistinctPRs, sorted. It is empty for a
+	// healthy job and for a periodic one, whose runs have no PR path.
+	FailingPRs []string    `json:"failing_prs,omitempty"`
+	Verdict    Verdict     `json:"verdict"`
+	Samples    []RunResult `json:"-"`
 }
 
 // Collect enumerates a job's runs and summarizes them. window <= 0 means the
@@ -279,6 +283,14 @@ func summarize(job string, results []RunResult, window time.Duration) *Summary {
 	}
 	s.To = to
 	s.DistinctPRs = len(prs)
+	if len(prs) > 0 {
+		s.FailingPRs = make([]string, 0, len(prs))
+		for pr := range prs {
+			s.FailingPRs = append(s.FailingPRs, pr)
+		}
+		// Map iteration is unordered; the card and the JSON must not be.
+		sort.Strings(s.FailingPRs)
+	}
 
 	if n := s.Pass + s.Fail; n > 0 {
 		s.PassRate = float64(s.Pass) / float64(n)
@@ -364,7 +376,14 @@ func prFromPath(p string) string {
 	if len(parts) < 2 {
 		return ""
 	}
-	return parts[0] + "#" + parts[1]
+	// parts[0] is the flattened org_repo. An org can never contain an
+	// underscore and a repo can, so the first one is the separator — the same
+	// rule prow.Repo uses on a run path.
+	org, repo, ok := strings.Cut(parts[0], "_")
+	if !ok || org == "" || repo == "" {
+		return parts[0] + "#" + parts[1]
+	}
+	return org + "/" + repo + "#" + parts[1]
 }
 
 // FormatRate renders a fraction as a percentage with one decimal.

@@ -15,7 +15,7 @@ existing ones keep their meaning.
 | Command | Top-level keys |
 |---|---|
 | `run` | `schema`, `job`, `run`, `tests`, `infra`, `artifacts`, `signals`, `next_action` |
-| `job` | `schema`, `job`, `from`, `to`, `runs`, `pass`, `fail`, `abort`, `missing`, `pass_rate`, `recent_pass_rate`, `streak`, `last_pass_at`, `distinct_prs_failing`, `verdict` |
+| `job` | `schema`, `job`, `from`, `to`, `runs`, `pass`, `fail`, `abort`, `missing`, `pass_rate`, `recent_pass_rate`, `streak`, `last_pass_at`, `distinct_prs_failing`, `failing_prs`, `verdict` |
 | `failures` | `schema`, `run`, `tests`, `failed_steps` |
 | `log` | `schema`, `artifact`, `lines`, `text` |
 | `artifact` | `schema`, `object`, `size`, `content_type`, `updated`, `excerpt`, `truncated` |
@@ -42,6 +42,8 @@ absent leaves it empty. Neither case is reported as healthy. See
 
 A top-level `warning` on `pr` means the fan-out itself failed, which can only be
 a recovered panic. It is command-level, so it does not name the check.
+
+`job`'s `failing_prs` lists the `org/repo#N` values behind `distinct_prs_failing`, sorted; it is absent when nothing failed.
 
 `job`'s per-run sample list is an internal detail and is not part of the JSON document;
 the aggregate counters are. `run` nests failed steps under `run.steps.failed`, while
