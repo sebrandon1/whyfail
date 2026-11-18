@@ -330,9 +330,31 @@ func TestJobGolden(t *testing.T) {
 	Job(&buf, &health.Summary{
 		Job: "pull-ci-org-repo-main-e2e", Runs: 154, Pass: 98, Fail: 56,
 		PassRate: 0.638, RecentPassRate: 0.61, Streak: 2, LastPass: &last,
-		DistinctPRs: 9, From: from, To: to, Verdict: health.VerdictFlaky,
+		DistinctPRs: 9,
+		FailingPRs:  []string{"org/repo#1", "org/repo#2", "org/repo#3", "org/repo#4"},
+		From:        from, To: to, Verdict: health.VerdictFlaky,
 	}, testStyle())
 	golden(t, "job-flaky.txt", buf.String())
+}
+
+// Three names then a count: enough to recognise the job as everyone's problem
+// without printing every PR.
+func TestPRPreview(t *testing.T) {
+	cases := []struct {
+		prs  []string
+		max  int
+		want string
+	}{
+		{nil, 3, ""},
+		{[]string{"a#1"}, 3, "a#1"},
+		{[]string{"a#1", "b#2", "c#3"}, 3, "a#1, b#2, c#3"},
+		{[]string{"a#1", "b#2", "c#3", "d#4", "e#5"}, 3, "a#1, b#2, c#3, … and 2 more"},
+	}
+	for _, c := range cases {
+		if got := prPreview(c.prs, c.max); got != c.want {
+			t.Errorf("prPreview(%v) = %q, want %q", c.prs, got, c.want)
+		}
+	}
 }
 
 func TestGainEmptyAndPopulated(t *testing.T) {

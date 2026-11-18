@@ -4,6 +4,6 @@ pull-ci-org-repo-main-e2e
   RUNS      154 total · 98 pass · 56 fail · 0 abort · 0 missing
   RATE      63.8% · recent 61.0% · streak 2
   LAST PASS 2026-11-12
-  FLAKY PRS 9 distinct PRs are failing
+  FLAKY PRS 9 distinct PRs are failing · org/repo#1, org/repo#2, org/repo#3, … and 1 more
 
   NEXT      a retest is reasonable

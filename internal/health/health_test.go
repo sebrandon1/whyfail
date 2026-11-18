@@ -189,11 +189,22 @@ func TestAbortsExcludedAndStreak(t *testing.T) {
 }
 
 func TestPRFromPath(t *testing.T) {
-	if got := prFromPath("pr-logs/pull/rh-ecosystem-edge_recert/2364/job/1"); got != "rh-ecosystem-edge_recert#2364" {
-		t.Fatalf("got %q", got)
+	cases := []struct {
+		in, want string
+	}{
+		{"pr-logs/pull/rh-ecosystem-edge_recert/2364/job/1", "rh-ecosystem-edge/recert#2364"},
+		// The org has no underscore and a repo may, so the first one separates.
+		{"pr-logs/pull/org_my_repo/7/job/9", "org/my_repo#7"},
+		// A segment with nothing to split still names the PR rather than
+		// dropping it.
+		{"pr-logs/pull/nounderscore/7/job/9", "nounderscore#7"},
+		{"logs/periodic/123", ""},
+		{"pr-logs/pull/onlyone", ""},
 	}
-	if got := prFromPath("logs/periodic/123"); got != "" {
-		t.Fatalf("got %q", got)
+	for _, c := range cases {
+		if got := prFromPath(c.in); got != c.want {
+			t.Errorf("prFromPath(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
@@ -388,5 +399,30 @@ func TestCollectKeepsRunsOrderedByTime(t *testing.T) {
 	}
 	if !s.Samples[0].Time.Before(s.Samples[1].Time) {
 		t.Fatalf("samples not sorted: %v then %v", s.Samples[0].Time, s.Samples[1].Time)
+	}
+}
+
+// The PRs behind the count are named, sorted, and absent when nothing failed.
+func TestSummarizeFailingPRs(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	results := []RunResult{
+		{Path: "pr-logs/pull/org_repo/9/job/1", Result: "FAILURE", Time: base},
+		{Path: "pr-logs/pull/org_repo/7/job/2", Result: "FAILURE", Time: base.Add(time.Hour)},
+		{Path: "pr-logs/pull/org_repo/9/job/3", Result: "FAILURE", Time: base.Add(2 * time.Hour)},
+		{Path: "pr-logs/pull/org_repo/7/job/4", Result: "SUCCESS", Time: base.Add(3 * time.Hour)},
+	}
+	s := summarize("j", results, 0)
+	if s.DistinctPRs != 2 {
+		t.Fatalf("distinct = %d, want 2", s.DistinctPRs)
+	}
+	want := []string{"org/repo#7", "org/repo#9"}
+	if len(s.FailingPRs) != len(want) || s.FailingPRs[0] != want[0] || s.FailingPRs[1] != want[1] {
+		t.Errorf("failing prs = %v, want %v", s.FailingPRs, want)
+	}
+
+	// A passing job names none, so the field stays out of the JSON.
+	healthy := summarize("j", build(repeat(10, "SUCCESS")...), 0)
+	if healthy.FailingPRs != nil {
+		t.Errorf("healthy job listed %v", healthy.FailingPRs)
 	}
 }
