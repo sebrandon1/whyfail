@@ -956,6 +956,35 @@ type PRCard struct {
 	Source string          `json:"source,omitempty"`
 	Prow   bool            `json:"prow"`
 	Health *health.Summary `json:"health"`
+	// HealthErr is set when the lookup itself failed, which is not the same as
+	// a job having no history. ErrJobNotFound is reported through Health alone,
+	// so this field only ever holds an error worth showing.
+	HealthErr string `json:"health_error,omitempty"`
+}
+
+// healthState names the outcome of a card's lookup once. A nil Health conflates
+// "the lookup failed" with "the job has no history", so the renderer used to
+// re-derive the difference from two fields in three branches.
+type healthState int
+
+const (
+	// healthKnown means the lookup produced a summary, whatever its verdict.
+	healthKnown healthState = iota
+	// healthFailed means the lookup itself errored.
+	healthFailed
+	// healthAbsent means the lookup succeeded and the job has no history.
+	healthAbsent
+)
+
+func (c PRCard) healthState() healthState {
+	switch {
+	case c.Health != nil:
+		return healthKnown
+	case c.HealthErr != "":
+		return healthFailed
+	default:
+		return healthAbsent
+	}
 }
 
 // The APIs a failing check can be reported through. Source carries one of these
@@ -983,8 +1012,9 @@ func (c PRCard) disambiguator() string {
 }
 
 // PR renders a PR's failing checks against the shared gutter, so the check
-// column lines up with every other card.
-func PR(w io.Writer, st term.Style, org, repo, num, title string, cards []PRCard) {
+// column lines up with every other card. A non-empty warning is printed under
+// the cards: it belongs to the lookup as a whole, not to any one check.
+func PR(w io.Writer, st term.Style, org, repo, num, title string, cards []PRCard, warning string) {
 	fmt.Fprintf(w, "%s/%s%s  %s\n\n", org, repo, st.Cyan("#"+num), title)
 	if len(cards) == 0 {
 		fmt.Fprintln(w, "no failing checks on the head commit")
@@ -1018,6 +1048,15 @@ func PR(w io.Writer, st term.Style, org, repo, num, title string, cards []PRCard
 	if bad > 0 && bad == len(cards) {
 		fmt.Fprintf(w, "\n  %s\n", st.Yellow("all failing jobs have poor history — the PR is probably not the cause"))
 	}
+	if warning != "" {
+		// Same rule as every other line: fold to the terminal rather than
+		// painting past it. The full text is still in the JSON.
+		avail := st.Width() - 2 - len("warning: ")
+		if avail < 1 {
+			avail = 1
+		}
+		fmt.Fprintf(w, "\n  %s %s\n", st.Dim("warning:"), st.Dim(term.Trunc(warning, avail)))
+	}
 }
 
 // cardLabelW is the width of the verdict column: icon, space, nine-char label.
@@ -1047,7 +1086,14 @@ func prCardLine(st term.Style, c PRCard, jobW int, suffix string) string {
 		return " " + st.Dim(term.Trunc(s, detailW))
 	}
 
-	if c.Health == nil {
+	switch c.healthState() {
+	case healthFailed:
+		// Saying "no history" here would turn a permissions error or a timeout
+		// into a fact about the job.
+		return fmt.Sprintf("  %s %s%s\n", name,
+			st.Red(term.PadRight("✗ FAILED", cardLabelW)),
+			note("health lookup failed: "+c.HealthErr))
+	case healthAbsent:
 		if !c.Prow {
 			return fmt.Sprintf("  %s %s%s\n", name,
 				st.Red(term.PadRight("✗ FAILED", cardLabelW)),
