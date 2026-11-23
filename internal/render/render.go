@@ -584,6 +584,11 @@ func Failures(w io.Writer, st term.Style, jobName, result string, steps []run.St
 func Job(w io.Writer, s *health.Summary, st term.Style) {
 	fmt.Fprintln(w, st.Bold(s.Job))
 	if s.Runs == 0 {
+		if s.LookupErrors > 0 {
+			row(w, st, "WINDOW", st.Yellow(fmt.Sprintf(
+				"%d run(s) could not be read; no complete runs to summarize", s.LookupErrors)))
+			return
+		}
 		row(w, st, "WINDOW", st.Dim("no runs found in the Prow index (job may be renamed or never have run)"))
 		return
 	}
@@ -595,6 +600,10 @@ func Job(w io.Writer, s *health.Summary, st term.Style) {
 
 	row(w, st, "RUNS", fmt.Sprintf("%d total · %d pass · %d fail · %d abort · %d missing",
 		s.Runs, s.Pass, s.Fail, s.Abort, s.Missing))
+	if s.LookupErrors > 0 {
+		row(w, st, "LOOKUP", st.Yellow(fmt.Sprintf(
+			"%d run(s) could not be read; counts are partial", s.LookupErrors)))
+	}
 	rowStyled(w, st, "RATE", fmt.Sprintf("%s · recent %s · streak %d",
 		health.FormatRate(s.PassRate), health.FormatRate(s.RecentPassRate), s.Streak),
 		func(v string) string { return v })

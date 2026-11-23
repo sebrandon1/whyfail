@@ -28,7 +28,22 @@ func fakeClient(t *testing.T, objects map[string]string, prefixes map[string][]s
 // fakeClientAt is fakeClient with an `updated` timestamp per listing entry.
 func fakeClientAt(t *testing.T, objects map[string]string, prefixes map[string][]string, updated func(string) time.Time) *gcs.Client {
 	t.Helper()
+	return fakeClientWith(t, objects, prefixes, updated, nil)
+}
+
+// fakeClientErr serves the fake corpus but returns HTTP 500 for any object name
+// matching fail, so a test can exercise the partial-read path without a real
+// network failure.
+func fakeClientErr(t *testing.T, objects map[string]string, prefixes map[string][]string, fail func(string) bool) *gcs.Client {
+	t.Helper()
+	return fakeClientWith(t, objects, prefixes, nil, fail)
+}
+
+func fakeClientWith(t *testing.T, objects map[string]string, prefixes map[string][]string, updated func(string) time.Time, fail func(string) bool) *gcs.Client {
+	t.Helper()
 	c := gcs.New(t.TempDir())
+	// No retries: a test that injects a 500 should not wait out the backoff.
+	c.Retries = 0
 	c.HTTP = &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
 		if strings.HasPrefix(r.URL.Path, "/storage/v1/") {
 			prefix := r.URL.Query().Get("prefix")
@@ -57,6 +72,9 @@ func fakeClientAt(t *testing.T, objects map[string]string, prefixes map[string][
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body))), Header: http.Header{}}, nil
 		}
 		key := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/"), "bkt/")
+		if fail != nil && fail(key) {
+			return &http.Response{StatusCode: 500, Body: io.NopCloser(strings.NewReader("boom")), Header: http.Header{}}, nil
+		}
 		if body, ok := objects[key]; ok {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 		}
@@ -123,6 +141,78 @@ func TestCollectMissingFinishedIsNotFailure(t *testing.T) {
 	}
 	if s.Missing != 1 || s.Fail != 0 {
 		t.Fatalf("pruned run must be missing, not failure: %+v", s)
+	}
+	if s.LookupErrors != 0 {
+		t.Fatalf("a genuine 404 is not a lookup error: %+v", s)
+	}
+}
+
+func TestCollectCountsLookupErrors(t *testing.T) {
+	objects := map[string]string{
+		"logs/job/500/finished.json": `{"result":"SUCCESS"}`,
+		"logs/job/501/finished.json": `{"result":"FAILURE"}`,
+		"logs/job/502/finished.json": `{"result":"SUCCESS"}`,
+	}
+	prefixes := map[string][]string{"logs/job/": {"logs/job/500/", "logs/job/501/", "logs/job/502/"}}
+	c := fakeClientErr(t, objects, prefixes, func(name string) bool {
+		return name == "logs/job/502/finished.json"
+	})
+
+	sum, err := Collect(context.Background(), c, "bkt", "job", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.LookupErrors != 1 {
+		t.Errorf("lookup errors = %d, want 1", sum.LookupErrors)
+	}
+	if sum.Missing != 0 {
+		t.Errorf("a failed read must not count as MISSING: %+v", sum)
+	}
+	if sum.Runs != 2 || sum.Pass != 1 || sum.Fail != 1 {
+		t.Errorf("counts: runs=%d pass=%d fail=%d, want 2/1/1", sum.Runs, sum.Pass, sum.Fail)
+	}
+}
+
+func TestCollectCountsDecodeErrors(t *testing.T) {
+	objects := map[string]string{
+		"logs/job/600/finished.json": `{not json`,
+		"logs/job/601/finished.json": `{"result":"SUCCESS"}`,
+	}
+	prefixes := map[string][]string{"logs/job/": {"logs/job/600/", "logs/job/601/"}}
+	c := fakeClient(t, objects, prefixes)
+
+	sum, err := Collect(context.Background(), c, "bkt", "job", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.LookupErrors != 1 {
+		t.Errorf("lookup errors = %d, want 1", sum.LookupErrors)
+	}
+	if sum.Missing != 0 || sum.Runs != 1 || sum.Pass != 1 {
+		t.Errorf("a decode error must not become a result: %+v", sum)
+	}
+}
+
+func TestCollectCountsIndexResolveErrors(t *testing.T) {
+	objects := map[string]string{
+		"pr-logs/directory/job/100.txt":            "gs://bkt/pr-logs/pull/o_r/1/job/100",
+		"pr-logs/directory/job/101.txt":            "gs://bkt/pr-logs/pull/o_r/1/job/101",
+		"pr-logs/pull/o_r/1/job/100/finished.json": `{"result":"SUCCESS"}`,
+		"pr-logs/pull/o_r/1/job/101/finished.json": `{"result":"FAILURE"}`,
+	}
+	c := fakeClientErr(t, objects, nil, func(name string) bool {
+		return name == "pr-logs/directory/job/101.txt"
+	})
+
+	sum, err := Collect(context.Background(), c, "bkt", "job", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.LookupErrors != 1 {
+		t.Errorf("lookup errors = %d, want 1", sum.LookupErrors)
+	}
+	if sum.Runs != 1 || sum.Pass != 1 {
+		t.Errorf("an unresolvable index entry must not be counted: %+v", sum)
 	}
 }
 

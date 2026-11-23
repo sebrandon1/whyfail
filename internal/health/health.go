@@ -73,6 +73,11 @@ type Summary struct {
 	Streak         int        `json:"streak"`
 	LastPass       *time.Time `json:"last_pass_at,omitempty"`
 	DistinctPRs    int        `json:"distinct_prs_failing"`
+	// LookupErrors counts runs whose read failed for a reason other than the
+	// object being absent: a 5xx, a timeout or a decode error. Those runs are
+	// left out of the counters rather than counted as MISSING, and a non-zero
+	// value means the rest of the summary is computed from a partial read.
+	LookupErrors int `json:"lookup_errors,omitempty"`
 	// FailingPRs names the PRs behind DistinctPRs, sorted. It is empty for a
 	// healthy job and for a periodic one, whose runs have no PR path.
 	FailingPRs []string    `json:"failing_prs,omitempty"`
@@ -97,7 +102,7 @@ func (s *Summary) Repo() string {
 // Collect enumerates a job's runs and summarizes them. window <= 0 means the
 // full retained history.
 func Collect(ctx context.Context, c *gcs.Client, bucket, job string, window time.Duration) (*Summary, error) {
-	paths, err := enumerate(ctx, c, bucket, job, window)
+	paths, enumErrors, err := enumerate(ctx, c, bucket, job, window)
 	if err != nil {
 		return nil, err
 	}
@@ -106,25 +111,34 @@ func Collect(ctx context.Context, c *gcs.Client, bucket, job string, window time
 	paths = recentOnly(paths, window)
 
 	// Each goroutine writes its own slot, so the results are ordered by run
-	// rather than by completion.
+	// rather than by completion. A failed read is recorded in failed rather
+	// than turned into a result: a 5xx is not a property of the run.
 	results := make([]RunResult, len(paths))
+	failed := make([]bool, len(paths))
 	err = parallel.Do(len(paths), fanOut, func(i int) error {
 		p := paths[i]
 		rr := RunResult{ID: p.ID, Path: p.Path, Time: p.Updated}
 		data, err := c.Get(ctx, bucket, p.Path+"/finished.json")
-		if err == nil {
+		switch {
+		case err != nil && !errors.Is(err, gcs.ErrNotFound):
+			// A transient failure: leave the run out of the rate.
+			failed[i] = true
+			return nil
+		case err == nil:
 			var f struct {
 				Result    string `json:"result"`
 				Timestamp int64  `json:"timestamp"`
 			}
-			if json.Unmarshal(data, &f) == nil {
-				// Prow's state spelling is not guaranteed case-stable across
-				// versions; normalise here so the stored result and the switch
-				// in summarize cannot disagree.
-				rr.Result = strings.ToUpper(strings.TrimSpace(f.Result))
-				if f.Timestamp > 0 {
-					rr.Time = time.Unix(f.Timestamp, 0).UTC()
-				}
+			if json.Unmarshal(data, &f) != nil {
+				failed[i] = true
+				return nil
+			}
+			// Prow's state spelling is not guaranteed case-stable across
+			// versions; normalise here so the stored result and the switch
+			// in summarize cannot disagree.
+			rr.Result = strings.ToUpper(strings.TrimSpace(f.Result))
+			if f.Timestamp > 0 {
+				rr.Time = time.Unix(f.Timestamp, 0).UTC()
 			}
 		}
 		if rr.Result == "" {
@@ -137,7 +151,19 @@ func Collect(ctx context.Context, c *gcs.Client, bucket, job string, window time
 		return nil, err
 	}
 
-	return summarize(job, results, window), nil
+	lookupErrors := enumErrors
+	kept := make([]RunResult, 0, len(results))
+	for i, rr := range results {
+		if failed[i] {
+			lookupErrors++
+			continue
+		}
+		kept = append(kept, rr)
+	}
+
+	sum := summarize(job, kept, window)
+	sum.LookupErrors = lookupErrors
+	return sum, nil
 }
 
 type runPath struct {
@@ -198,11 +224,11 @@ func dropOutsideWindow[T any](items []T, updated func(T) time.Time, window time.
 	return out
 }
 
-func enumerate(ctx context.Context, c *gcs.Client, bucket, job string, window time.Duration) ([]runPath, error) {
+func enumerate(ctx context.Context, c *gcs.Client, bucket, job string, window time.Duration) ([]runPath, int, error) {
 	// Presubmits are indexed as one tiny .txt per run.
 	objs, err := c.List(ctx, bucket, "pr-logs/directory/"+job+"/")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	// Collect the index entries first, then resolve the ones inside the window
 	// in parallel: one sequential GET per retained run is the cold-start cost
@@ -223,9 +249,15 @@ func enumerate(ctx context.Context, c *gcs.Client, bucket, job string, window ti
 	entries = recentEntries(entries, window)
 
 	paths := make([]string, len(entries))
+	failed := make([]bool, len(entries))
 	err = parallel.Do(len(entries), fanOut, func(i int) error {
 		data, err := c.Get(ctx, bucket, entries[i].name)
 		if err != nil {
+			// A vanished pointer is not an error, but a transient failure is
+			// counted so the summary can say it read only part of the index.
+			if !errors.Is(err, gcs.ErrNotFound) {
+				failed[i] = true
+			}
 			return nil
 		}
 		p := strings.TrimSpace(string(data))
@@ -235,24 +267,28 @@ func enumerate(ctx context.Context, c *gcs.Client, bucket, job string, window ti
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
+	lookupErrors := 0
 	out := make([]runPath, 0, len(entries))
 	for i, e := range entries {
+		if failed[i] {
+			lookupErrors++
+		}
 		if paths[i] == "" {
 			continue
 		}
 		out = append(out, runPath{ID: e.id, Path: paths[i], Updated: e.updated})
 	}
 	if len(out) > 0 {
-		return out, nil
+		return out, lookupErrors, nil
 	}
 
 	// Periodics are directories under logs/<job>/.
 	dirs, err := c.ListDirs(ctx, bucket, "logs/"+job+"/")
 	if err != nil {
-		return nil, err
+		return nil, lookupErrors, err
 	}
 	for _, d := range dirs {
 		d = strings.TrimSuffix(d, "/")
@@ -266,9 +302,9 @@ func enumerate(ctx context.Context, c *gcs.Client, bucket, job string, window ti
 	// but whose index entries are unusable still has objects, so it stays an
 	// empty summary rather than becoming an error.
 	if len(objs) == 0 && len(dirs) == 0 {
-		return nil, ErrJobNotFound
+		return nil, lookupErrors, ErrJobNotFound
 	}
-	return out, nil
+	return out, lookupErrors, nil
 }
 
 func summarize(job string, results []RunResult, window time.Duration) *Summary {
