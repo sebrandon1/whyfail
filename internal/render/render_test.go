@@ -312,6 +312,18 @@ func TestJobCard(t *testing.T) {
 				From: from, To: to, LastPass: &to, Verdict: health.VerdictHealthy},
 			want: "passes reliably",
 		},
+		{
+			name: "partial read",
+			s: health.Summary{Job: "j", Runs: 9, Pass: 8, Fail: 1, PassRate: 0.89,
+				RecentPassRate: 0.9, From: from, To: to, LastPass: &last,
+				LookupErrors: 2, Verdict: health.VerdictFlaky},
+			want: "counts are partial",
+		},
+		{
+			name: "every run unreadable",
+			s:    health.Summary{Job: "j", Verdict: health.VerdictUnknown, LookupErrors: 3},
+			want: "no complete runs to summarize",
+		},
 	}
 	for _, c := range cases {
 		var buf bytes.Buffer

@@ -44,10 +44,14 @@ type reportJob struct {
 	Fail           int            `json:"fail"`
 	Abort          int            `json:"abort"`
 	Missing        int            `json:"missing"`
-	Streak         int            `json:"streak"`
-	LastPassAt     *time.Time     `json:"last_pass_at"`
-	DistinctPRs    int            `json:"distinct_prs_failing"`
-	URL            string         `json:"url"`
+	// LookupErrors is a count carried from health.Summary: runs whose read
+	// failed for a reason other than absence. Non-zero means the row's rates
+	// come from a partial read.
+	LookupErrors int        `json:"lookup_errors,omitempty"`
+	Streak       int        `json:"streak"`
+	LastPassAt   *time.Time `json:"last_pass_at"`
+	DistinctPRs  int        `json:"distinct_prs_failing"`
+	URL          string     `json:"url"`
 	// Error is set when the lookup itself failed, so a transient bucket error
 	// does not silently look like a job that nobody has run.
 	Error string `json:"error,omitempty"`
@@ -118,6 +122,7 @@ func newReportCmd(g *globals) *cobra.Command {
 						Fail:           sum.Fail,
 						Abort:          sum.Abort,
 						Missing:        sum.Missing,
+						LookupErrors:   sum.LookupErrors,
 						Streak:         sum.Streak,
 						LastPassAt:     sum.LastPass,
 						DistinctPRs:    sum.DistinctPRs,

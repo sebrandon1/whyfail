@@ -15,7 +15,7 @@ existing ones keep their meaning.
 | Command | Top-level keys |
 |---|---|
 | `run` | `schema`, `job`, `run`, `tests`, `infra`, `artifacts`, `signals`, `next_action` |
-| `job` | `schema`, `job`, `from`, `to`, `runs`, `pass`, `fail`, `abort`, `missing`, `pass_rate`, `recent_pass_rate`, `streak`, `last_pass_at`, `distinct_prs_failing`, `failing_prs`, `verdict` |
+| `job` | `schema`, `job`, `from`, `to`, `runs`, `pass`, `fail`, `abort`, `missing`, `lookup_errors`, `pass_rate`, `recent_pass_rate`, `streak`, `last_pass_at`, `distinct_prs_failing`, `failing_prs`, `verdict` |
 | `failures` | `schema`, `run`, `tests`, `failed_steps` |
 | `log` | `schema`, `artifact`, `lines`, `text` |
 | `artifact` | `schema`, `object`, `size`, `content_type`, `updated`, `excerpt`, `truncated` |
@@ -48,6 +48,11 @@ a recovered panic. It is command-level, so it does not name the check.
 `job`'s `pass`, `fail`, `abort` and `missing` counters are derived from each run's
 `finished.json` `result`, matched case-insensitively; a run with an unrecognised or
 absent result counts as `missing`.
+
+`job`'s `lookup_errors` counts runs whose read failed for a reason other than
+absence (a 5xx, a timeout, a decode error). Those runs are excluded from the
+counters rather than reported as `missing`; a non-zero value means the rest of the
+summary comes from a partial read. It is omitted when zero.
 
 `job`'s per-run sample list is an internal detail and is not part of the JSON document;
 the aggregate counters are. `run` nests failed steps under `run.steps.failed`, while

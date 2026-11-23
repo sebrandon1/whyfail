@@ -19,6 +19,12 @@ gone are counted as `missing` and likewise excluded. Pass rate is
 `pass / (pass + fail)`. The "recent" rate is the same ratio over the last 10
 completed runs.
 
+A read that fails for a reason other than absence — a 5xx, a timeout, a decode
+error — is not a fact about the run, so it is counted in `lookup_errors` and left
+out of the counters entirely. A non-zero `lookup_errors` means the summary was
+computed from a partial read; the card says so, and the verdict should be treated
+as provisional.
+
 Every card prints the retention window it actually used, and the run count beside a
 rate describes that same window. `--window` bounds the fetch as well as the
 arithmetic, so the denominator can never describe a longer period than the numbers.
