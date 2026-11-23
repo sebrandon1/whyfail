@@ -89,9 +89,12 @@ func newReportCmd(g *globals) *cobra.Command {
 		Short: "Collect job health for a curated job list as one JSON snapshot",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
-			names, err := readJobList(jobsFile)
+			names, duplicates, err := readJobList(jobsFile)
 			if err != nil {
 				return err
+			}
+			if duplicates > 0 {
+				fmt.Fprintf(os.Stderr, "whyfail report: ignored %d duplicate job name(s) in %s\n", duplicates, jobsFile)
 			}
 			ctx, cancel := g.ctx()
 			defer cancel()
@@ -194,23 +197,32 @@ func windowLabel(d time.Duration) string {
 }
 
 // readJobList reads one job name per line, ignoring blank lines and comments.
-func readJobList(path string) ([]string, error) {
+// A name repeated in the file is counted and kept once, so a hand-editing slip
+// cannot put the same job on the board twice.
+func readJobList(path string) ([]string, int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read job list: %w", err)
+		return nil, 0, fmt.Errorf("read job list: %w", err)
 	}
 	var out []string
+	seen := map[string]bool{}
+	duplicates := 0
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if seen[line] {
+			duplicates++
+			continue
+		}
+		seen[line] = true
 		out = append(out, line)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("%s lists no jobs", path)
+		return nil, 0, fmt.Errorf("%s lists no jobs", path)
 	}
-	return out, nil
+	return out, duplicates, nil
 }
 
 // verdictRank orders rows worst first, so the board needs no extra sort key.

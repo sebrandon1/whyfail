@@ -15,7 +15,7 @@ func TestReadJobList(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := readJobList(path)
+	got, dups, err := readJobList(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,13 +23,39 @@ func TestReadJobList(t *testing.T) {
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("jobs = %v, want %v", got, want)
 	}
+	if dups != 0 {
+		t.Errorf("duplicates = %d, want 0", dups)
+	}
+
+	// A repeated name (even with different whitespace) yields one row and is
+	// counted, so a hand-editing slip is visible rather than silently doubling
+	// a board row.
+	dupBody := "pull-ci-org-repo-main-unit\npull-ci-org-repo-main-e2e\n  pull-ci-org-repo-main-unit  \n"
+	if err := os.WriteFile(path, []byte(dupBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, dups, err = readJobList(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("deduped jobs = %v, want %v", got, want)
+	}
+	if dups != 1 {
+		t.Errorf("duplicates = %d, want 1", dups)
+	}
 
 	// An empty list is an error: publishing an empty board is worse than failing.
 	if err := os.WriteFile(path, []byte("# nothing yet\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readJobList(path); err == nil {
+	if _, _, err := readJobList(path); err == nil {
 		t.Error("want an error for a list with no jobs")
+	}
+
+	// A missing file is an error, not an empty list.
+	if _, _, err := readJobList(filepath.Join(dir, "absent.txt")); err == nil {
+		t.Error("want an error for a missing job list")
 	}
 }
 
