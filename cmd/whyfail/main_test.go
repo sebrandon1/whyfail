@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"github.com/sebrandon1/whyfail/internal/api"
 	"github.com/sebrandon1/whyfail/internal/claudecfg"
 	"github.com/sebrandon1/whyfail/internal/enrich"
+	"github.com/sebrandon1/whyfail/internal/gcs"
 	"github.com/sebrandon1/whyfail/internal/gcstest"
 	"github.com/sebrandon1/whyfail/internal/health"
 	"github.com/sebrandon1/whyfail/internal/render"
@@ -888,6 +890,8 @@ func TestMCPTarget(t *testing.T) {
 		{"prow_run", map[string]any{"url": "https://prow/view/gs/bucket/pr-logs/pull/o_r/1/job/2"}, "https://prow/view/gs/bucket/pr-logs/pull/o_r/1/job/2"},
 		{"prow_job", map[string]any{"job": "pull-ci-o-r-main-unit"}, "pull-ci-o-r-main-unit"},
 		{"prow_pr", map[string]any{"pr": "https://github.com/org/repo/pull/7"}, "https://github.com/org/repo/pull/7"},
+		{"prow_search", map[string]any{"query": "boom"}, "boom"},
+		{"prow_log", map[string]any{"url": "gs://b/x/y/job/1"}, "gs://b/x/y/job/1"},
 		// A missing or mistyped argument leaves the target empty rather than
 		// inventing one, and an unknown tool has nothing to name.
 		{"prow_run", map[string]any{}, ""},
@@ -911,6 +915,8 @@ func TestMCPRepo(t *testing.T) {
 		want string
 	}{
 		{"prow_run", map[string]any{"url": "gs://b/pr-logs/pull/org_repo/1/job/2"}, "org/repo"},
+		{"prow_log", map[string]any{"url": "gs://b/pr-logs/pull/org_repo/1/job/2"}, "org/repo"},
+		{"prow_search", map[string]any{"query": "boom"}, ""},
 		{"prow_run", map[string]any{"url": "https://prow.ci.openshift.org/view/gs/buk/pr-logs/pull/rh-ecosystem-edge_recert/2364/job/9"}, "rh-ecosystem-edge/recert"},
 		// A periodic run has no PR path, so there is no repository to name.
 		{"prow_run", map[string]any{"url": "gs://b/logs/pull-ci-org-repo-main-unit/123"}, ""},
@@ -1063,5 +1069,133 @@ func TestParsePRArg(t *testing.T) {
 func TestCanonicalPRURL(t *testing.T) {
 	if got := canonicalPRURL("sebrandon1", "whyfail", "68"); got != "https://github.com/sebrandon1/whyfail/pull/68" {
 		t.Errorf("canonicalPRURL = %q", got)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func mcpJSONResponse(body string) *http.Response {
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}
+}
+
+func TestMCPToolsCatalogue(t *testing.T) {
+	names := map[string]bool{}
+	for _, tool := range mcpTools {
+		name, _ := tool["name"].(string)
+		names[name] = true
+		if tool["description"] == nil || tool["inputSchema"] == nil {
+			t.Errorf("%s is missing a description or inputSchema", name)
+		}
+	}
+	for _, want := range []string{"prow_run", "prow_job", "prow_pr", "prow_search", "prow_log"} {
+		if !names[want] {
+			t.Errorf("tool catalogue is missing %s", want)
+		}
+	}
+	if len(mcpTools) != 5 {
+		t.Errorf("tools = %d, want 5", len(mcpTools))
+	}
+}
+
+func TestMCPCallProwLog(t *testing.T) {
+	d, run := logDataset(t)
+	client := gcstest.Client(t, d)
+	url := "gs://" + gcstest.Bucket + "/" + run
+
+	text, err := mcpCallWith(context.Background(), &globals{noStats: true}, client, "prow_log",
+		map[string]any{"url": url, "step": "release"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc logOut
+	if err := json.Unmarshal([]byte(text), &doc); err != nil {
+		t.Fatalf("prow_log did not return JSON: %v\n%s", err, text)
+	}
+	if doc.Schema != api.SchemaV1 || doc.Text != "release log\n" || doc.Lines != 1 {
+		t.Errorf("document = %+v", doc)
+	}
+	if !strings.HasSuffix(doc.Artifact, "/release/build-log.txt") {
+		t.Errorf("artifact = %q", doc.Artifact)
+	}
+}
+
+func TestMCPCallProwLogGrep(t *testing.T) {
+	d, run := logDataset(t)
+	client := gcstest.Client(t, d)
+	url := "gs://" + gcstest.Bucket + "/" + run
+
+	text, err := mcpCallWith(context.Background(), &globals{noStats: true}, client, "prow_log",
+		map[string]any{"url": url, "step": "job", "grep": "job"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc logOut
+	if err := json.Unmarshal([]byte(text), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Lines != 1 || !strings.Contains(doc.Text, "job log") {
+		t.Errorf("grep document = %+v", doc)
+	}
+}
+
+func TestMCPCallProwSearch(t *testing.T) {
+	client := gcs.New(t.TempDir())
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return mcpJSONResponse(`{"job-a":{"test":[{"name":"t","context":["see OCPBUGS-1234"]}]}}`), nil
+	})}
+
+	text, err := mcpCallWith(context.Background(), &globals{noStats: true}, client, "prow_search",
+		map[string]any{"query": "boom"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res enrich.SearchResult
+	if err := json.Unmarshal([]byte(text), &res); err != nil {
+		t.Fatalf("prow_search did not return JSON: %v\n%s", err, text)
+	}
+	if res.Matches != 1 || res.KnownBug != "OCPBUGS-1234" || len(res.Jobs) != 1 || res.Jobs[0] != "job-a" {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestMCPCallErrors(t *testing.T) {
+	client := gcs.New(t.TempDir())
+	cases := []struct {
+		name string
+		tool string
+		args map[string]any
+		want string
+	}{
+		{"unknown tool", "nonesuch", map[string]any{}, "unknown tool"},
+		{"search without query", "prow_search", map[string]any{"query": ""}, "non-empty query"},
+		{"log without step", "prow_log", map[string]any{"url": "gs://bkt/a/b/job/1"}, "needs a step"},
+		{"log with bad url", "prow_log", map[string]any{"url": "nope", "step": "job"}, "not a Prow run reference"},
+		{"log with bad grep", "prow_log", map[string]any{"url": "gs://bkt/a/b/job/1", "step": "job", "grep": "("}, "invalid grep pattern"},
+	}
+	for _, c := range cases {
+		if _, err := mcpCallWith(context.Background(), &globals{noStats: true}, client, c.tool, c.args); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
+		}
+	}
+}
+
+func TestIntArg(t *testing.T) {
+	cases := []struct {
+		args map[string]any
+		key  string
+		def  int
+		want int
+	}{
+		{map[string]any{"tail": float64(5)}, "tail", 120, 5},
+		{map[string]any{}, "tail", 120, 120},
+		{map[string]any{"tail": float64(0)}, "tail", 120, 120},
+		{map[string]any{"tail": "5"}, "tail", 120, 120},
+	}
+	for _, c := range cases {
+		if got := intArg(c.args, c.key, c.def); got != c.want {
+			t.Errorf("intArg(%v, %q, %d) = %d, want %d", c.args, c.key, c.def, got, c.want)
+		}
 	}
 }
