@@ -8,7 +8,7 @@ Back to the [README](../README.md).
 ```sh
 whyfail run <prow-url | gs://bucket/path>   # digest one run
 whyfail job <job-name>                      # health over retained history
-whyfail pr <github-pr-url>                  # every failing check on the head commit
+whyfail pr <github-pr-url | owner/repo#N | N --repo owner/repo>  # every failing check on the head commit
 whyfail failures <prow-url>                 # failed tests and steps only
 whyfail log <prow-url> <step> [--tail N] [--grep RE]   # bounded build-log view
 whyfail artifact <gcs-url>                  # metadata and excerpt, or --list a prefix
@@ -57,6 +57,8 @@ Command-specific flags:
 - `artifact` — `--list` (list a prefix instead of reading an object), `--limit <n>`
   (maximum objects to list, default 200; `0` = all)
 - `search` — `--max-age <dur>` (search window, default `48h`)
+- `pr` — `--repo <owner/repo>` (repository for a bare PR number; a full URL and
+  `owner/repo#N` need no flag)
 - `gain` — `--history` (recent calls), `--fun` (the less serious statistics),
   `--since <dur>`, `--by cmd|repo` (aliases: `stats`, `saved`)
 - `init` — `--global` (install for the user, the default), `--project` (install for the

@@ -1022,3 +1022,46 @@ func TestTimeoutErrorMessage(t *testing.T) {
 		t.Fatalf("with --timeout 0 the raw error should pass through, got %v", got)
 	}
 }
+
+func TestParsePRArg(t *testing.T) {
+	cases := []struct {
+		name    string
+		arg     string
+		repo    string
+		org     string
+		repoOut string
+		num     string
+		wantErr bool
+	}{
+		{"full url", "https://github.com/sebrandon1/whyfail/pull/68", "", "sebrandon1", "whyfail", "68", false},
+		{"url with trailing slash", "https://github.com/sebrandon1/whyfail/pull/68/", "", "sebrandon1", "whyfail", "68", false},
+		{"shorthand", "sebrandon1/whyfail#68", "", "sebrandon1", "whyfail", "68", false},
+		{"bare with repo", "68", "sebrandon1/whyfail", "sebrandon1", "whyfail", "68", false},
+		{"bare without repo", "68", "", "", "", "", true},
+		{"repo flag without slash", "68", "sebrandon1", "", "", "", true},
+		{"repo flag with an extra slash", "68", "a/b/c", "", "", "", true},
+		{"not a pr", "not-a-pr", "", "", "", "", true},
+	}
+	for _, c := range cases {
+		org, repo, num, err := parsePRArg(c.arg, c.repo)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("%s: want an error, got %s/%s#%s", c.name, org, repo, num)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if org != c.org || repo != c.repoOut || num != c.num {
+			t.Errorf("%s: got %s/%s#%s, want %s/%s#%s", c.name, org, repo, num, c.org, c.repoOut, c.num)
+		}
+	}
+}
+
+func TestCanonicalPRURL(t *testing.T) {
+	if got := canonicalPRURL("sebrandon1", "whyfail", "68"); got != "https://github.com/sebrandon1/whyfail/pull/68" {
+		t.Errorf("canonicalPRURL = %q", got)
+	}
+}
