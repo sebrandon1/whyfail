@@ -973,21 +973,57 @@ func sameFile(a, b string) bool {
 // ---------- pr ----------
 var prURLRe = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$`)
 
+// prShorthandRe matches owner/repo#N, the form a PR is usually referred to in
+// review and issue comments.
+var prShorthandRe = regexp.MustCompile(`^([^/\s#]+)/([^/\s#]+)#(\d+)$`)
+
+// prNumberRe matches a bare PR number, which needs --repo to be unambiguous.
+var prNumberRe = regexp.MustCompile(`^(\d+)$`)
+
+// parsePRArg resolves the accepted PR arguments into org, repo and number.
+// repoFlag supplies the repository for a bare number; it is never inferred from
+// the working directory or gh, so a typo stays an error rather than a lookup.
+func parsePRArg(arg, repoFlag string) (org, repo, num string, err error) {
+	if m := prURLRe.FindStringSubmatch(arg); m != nil {
+		return m[1], m[2], m[3], nil
+	}
+	if m := prShorthandRe.FindStringSubmatch(arg); m != nil {
+		return m[1], m[2], m[3], nil
+	}
+	if m := prNumberRe.FindStringSubmatch(arg); m != nil {
+		if repoFlag == "" {
+			return "", "", "", fmt.Errorf("%s is a bare PR number; pass --repo owner/repo", arg)
+		}
+		o, r, ok := strings.Cut(repoFlag, "/")
+		if !ok || o == "" || r == "" || strings.Contains(r, "/") {
+			return "", "", "", fmt.Errorf("--repo must be owner/repo, got %q", repoFlag)
+		}
+		return o, r, m[1], nil
+	}
+	return "", "", "", fmt.Errorf("not a GitHub PR reference: %s (want a URL, owner/repo#N, or N with --repo)", arg)
+}
+
+// canonicalPRURL is the one form the rest of the command and the JSON document
+// use, whatever the input spelling.
+func canonicalPRURL(org, repo, num string) string {
+	return "https://github.com/" + org + "/" + repo + "/pull/" + num
+}
+
 // prFanOut is how many failing checks are looked up at once. Each health.Collect
 // fans out internally, so the outer width stays small.
 const prFanOut = 4
 
 func newPRCmd(g *globals) *cobra.Command {
-	return &cobra.Command{
-		Use:   "pr <github-pr-url>",
+	var repoFlag string
+	cmd := &cobra.Command{
+		Use:   "pr <github-pr-url | owner/repo#N | N>",
 		Short: "Health of every failing check on a PR's head commit",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
-			m := prURLRe.FindStringSubmatch(args[0])
-			if m == nil {
-				return fmt.Errorf("not a GitHub PR URL: %s", args[0])
+			org, repo, num, err := parsePRArg(args[0], repoFlag)
+			if err != nil {
+				return err
 			}
-			org, repo, num := m[1], m[2], m[3]
 			if _, err := exec.LookPath("gh"); err != nil {
 				return fmt.Errorf("the pr command needs the gh CLI for GitHub access")
 			}
@@ -997,7 +1033,7 @@ func newPRCmd(g *globals) *cobra.Command {
 			c := newClient(g)
 			start := time.Now()
 
-			doc, err := buildPRReport(ctx, g, c, execGH, args[0])
+			doc, err := buildPRReport(ctx, g, c, execGH, canonicalPRURL(org, repo, num))
 			if err != nil {
 				return err
 			}
@@ -1012,6 +1048,8 @@ func newPRCmd(g *globals) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&repoFlag, "repo", "", "owner/repo, for a bare PR number")
+	return cmd
 }
 
 // buildPRReport resolves a PR and collects the health of every failing check.
