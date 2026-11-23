@@ -45,6 +45,10 @@ a recovered panic. It is command-level, so it does not name the check.
 
 `job`'s `failing_prs` lists the `org/repo#N` values behind `distinct_prs_failing`, sorted; it is absent when nothing failed.
 
+`job`'s `pass`, `fail`, `abort` and `missing` counters are derived from each run's
+`finished.json` `result`, matched case-insensitively; a run with an unrecognised or
+absent result counts as `missing`.
+
 `job`'s per-run sample list is an internal detail and is not part of the JSON document;
 the aggregate counters are. `run` nests failed steps under `run.steps.failed`, while
 `failures` lists them at `failed_steps` — both names are part of v1.

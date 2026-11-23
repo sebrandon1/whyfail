@@ -118,7 +118,10 @@ func Collect(ctx context.Context, c *gcs.Client, bucket, job string, window time
 				Timestamp int64  `json:"timestamp"`
 			}
 			if json.Unmarshal(data, &f) == nil {
-				rr.Result = f.Result
+				// Prow's state spelling is not guaranteed case-stable across
+				// versions; normalise here so the stored result and the switch
+				// in summarize cannot disagree.
+				rr.Result = strings.ToUpper(strings.TrimSpace(f.Result))
 				if f.Timestamp > 0 {
 					rr.Time = time.Unix(f.Timestamp, 0).UTC()
 				}
