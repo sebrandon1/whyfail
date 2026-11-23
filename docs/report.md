@@ -16,11 +16,24 @@ whyfail report --jobs report/jobs.txt --window 720h --out snapshot.json
 Each row is the same summary `whyfail job <name>` prints — verdict, pass rate,
 recent rate, run counts, fail streak, distinct failing PRs — plus the repository
 (derived offline from the run paths) and the job's Prow history URL. Rows are
-sorted worst first: verdict severity, then failing runs, then name.
+sorted worst first: verdict severity, then a regression, then failing runs, then
+name.
 
 A job in the list that matches nothing in the bucket becomes an `UNKNOWN` row
 rather than an error, and a lookup that fails carries `error` on the row, so one
 flaky bucket request cannot blank the board.
+
+### Since the last point
+
+When `--history` is given, each row is compared with the newest point in that
+file *strictly before today*, so a same-day re-run compares against yesterday
+rather than against its own earlier attempt. A row that got worse carries
+`regressed: true` and its `previous_verdict`; the page shows a "newly broken"
+count and a `was <verdict>` marker beside the row. `UNKNOWN` on either side is
+not compared — it means there was no signal, not that the job improved or broke.
+
+Without `--history` both fields are omitted and the snapshot is exactly what it
+was before.
 
 ## What publishes it
 

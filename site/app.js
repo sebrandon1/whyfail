@@ -68,19 +68,38 @@ function chips(jobs) {
   const counts = { BROKEN: 0, FLAKY: 0, DEGRADED: 0, HEALTHY: 0, UNKNOWN: 0 };
   for (const j of jobs) counts[j.verdict] = (counts[j.verdict] || 0) + 1;
   const host = $("chips");
-  host.replaceChildren(
-    ...Object.entries(counts).map(([v, n]) =>
-      el("span", { class: "chip" }, el("b", {}, n), " ", v.toLowerCase())
-    )
+  const nodes = Object.entries(counts).map(([v, n]) =>
+    el("span", { class: "chip" }, el("b", {}, n), " ", v.toLowerCase())
   );
+  // A regression is the one thing a daily refresh can show that a single
+  // snapshot cannot, so it gets its own chip above the verdict counts.
+  const broken = jobs.filter((j) => j.regressed).length;
+  if (broken > 0) {
+    nodes.unshift(el("span", { class: "chip newly-broken" }, el("b", {}, broken), " newly broken"));
+  }
+  host.replaceChildren(...nodes);
 }
 
 function row(j) {
   const tr = el("tr", { class: j.error ? "err" : String(j.verdict).toLowerCase() });
+  const verdict = el(
+    "td",
+    {},
+    el("span", { class: "verdict " + verdictClass(j.verdict) }, j.error ? "ERROR" : j.verdict)
+  );
+  if (j.regressed) {
+    verdict.append(
+      el(
+        "span",
+        { class: "regressed", title: "previous verdict: " + j.previous_verdict },
+        "was " + String(j.previous_verdict).toLowerCase()
+      )
+    );
+  }
   tr.append(
     el("td", { class: "job" }, el("a", { href: j.url, target: "_blank", rel: "noreferrer" }, j.job)),
     el("td", { class: "repo" }, j.repo || "—"),
-    el("td", {}, el("span", { class: "verdict " + verdictClass(j.verdict) }, j.error ? "ERROR" : j.verdict)),
+    verdict,
     el("td", { class: "num" }, pct(j.pass_rate)),
     el("td", { class: "num" }, pct(j.recent_pass_rate)),
     el("td", { class: "num runs" }, j.runs),

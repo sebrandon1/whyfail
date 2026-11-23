@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sebrandon1/whyfail/internal/health"
 )
 
 func TestReadJobList(t *testing.T) {
@@ -67,12 +69,15 @@ func TestSortReportJobs(t *testing.T) {
 		{Job: "degraded", Verdict: "DEGRADED", Fail: 3},
 		{Job: "flaky-b", Verdict: "FLAKY", Fail: 5},
 		{Job: "flaky-a", Verdict: "FLAKY", Fail: 9},
+		{Job: "flaky-new", Verdict: "FLAKY", Fail: 2, Regressed: true},
 		{Job: "broken", Verdict: "BROKEN", Fail: 1},
 		{Job: "unknown", Verdict: "UNKNOWN"},
 	}
 	sortReportJobs(jobs)
 
-	want := []string{"broken", "flaky-a", "flaky-b", "degraded", "unknown", "healthy"}
+	// A regression outranks the fail count inside a tier, so the job that just
+	// broke is above the one that has been flaky all along.
+	want := []string{"broken", "flaky-new", "flaky-a", "flaky-b", "degraded", "unknown", "healthy"}
 	for i, w := range want {
 		if jobs[i].Job != w {
 			t.Errorf("row %d = %q, want %q (order: %v)", i, jobs[i].Job, w, jobNames(jobs))
@@ -174,5 +179,97 @@ func TestWindowLabel(t *testing.T) {
 		if got := windowLabel(c.d); got != c.want {
 			t.Errorf("windowLabel(%v) = %q, want %q", c.d, got, c.want)
 		}
+	}
+}
+
+func TestLoadHistory(t *testing.T) {
+	dir := t.TempDir()
+
+	// A missing file is the first day, not an error.
+	if h, err := loadHistory(filepath.Join(dir, "absent.json")); err != nil || h != nil {
+		t.Fatalf("missing history = %v, %v; want nil, nil", h, err)
+	}
+
+	path := filepath.Join(dir, "history.json")
+	body := `{"schema":"whyfail/v1","points":[{"date":"2026-11-22","jobs":{"a":{"verdict":"FLAKY","pass_rate":0.7,"runs":10}}}]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := loadHistory(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.Points) != 1 || h.Points[0].Jobs["a"].Verdict != "FLAKY" {
+		t.Fatalf("history = %+v", h)
+	}
+
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadHistory(path); err == nil {
+		t.Fatal("want an error for a corrupt history file")
+	}
+}
+
+func TestPreviousVerdicts(t *testing.T) {
+	h := &historyOut{Points: []historyPoint{
+		{Date: "2026-11-20", Jobs: map[string]historyJob{"a": {Verdict: "HEALTHY"}, "b": {Verdict: "BROKEN"}}},
+		{Date: "2026-11-22", Jobs: map[string]historyJob{"a": {Verdict: "FLAKY"}, "c": {Verdict: "DEGRADED"}}},
+		// Same day and a later point must both be ignored.
+		{Date: "2026-11-23", Jobs: map[string]historyJob{"a": {Verdict: "BROKEN"}}},
+	}}
+	got := previousVerdicts(h, "2026-11-23")
+	if got["a"] != "FLAKY" || got["c"] != "DEGRADED" {
+		t.Errorf("previous = %v, want the 11-22 point", got)
+	}
+	if _, ok := got["b"]; ok {
+		t.Error("a job absent from the newest point must not carry an older verdict")
+	}
+	if previousVerdicts(nil, "2026-11-23") != nil {
+		t.Error("no history must yield no previous verdicts")
+	}
+	only := &historyOut{Points: []historyPoint{{Date: "2026-11-23", Jobs: map[string]historyJob{"a": {Verdict: "BROKEN"}}}}}
+	if got := previousVerdicts(only, "2026-11-23"); got != nil {
+		t.Errorf("a same-day-only history must yield nothing, got %v", got)
+	}
+}
+
+func TestMarkRegressions(t *testing.T) {
+	cases := []struct {
+		name    string
+		today   health.Verdict
+		prev    health.Verdict
+		present bool
+		regress bool
+		prevOut health.Verdict
+	}{
+		{"healthy to flaky", "FLAKY", "HEALTHY", true, true, "HEALTHY"},
+		{"flaky to broken", "BROKEN", "FLAKY", true, true, "FLAKY"},
+		{"flaky to healthy", "HEALTHY", "FLAKY", true, false, "FLAKY"},
+		{"unchanged", "FLAKY", "FLAKY", true, false, "FLAKY"},
+		{"unknown before", "BROKEN", "UNKNOWN", true, false, ""},
+		{"unknown now", "UNKNOWN", "HEALTHY", true, false, ""},
+		{"no previous point", "BROKEN", "", false, false, ""},
+	}
+	for _, c := range cases {
+		jobs := []reportJob{{Job: "j", Verdict: c.today}}
+		prev := map[string]health.Verdict{}
+		if c.present {
+			prev["j"] = c.prev
+		}
+		markRegressions(jobs, prev)
+		if jobs[0].Regressed != c.regress {
+			t.Errorf("%s: regressed = %v, want %v", c.name, jobs[0].Regressed, c.regress)
+		}
+		if jobs[0].PreviousVerdict != c.prevOut {
+			t.Errorf("%s: previous = %q, want %q", c.name, jobs[0].PreviousVerdict, c.prevOut)
+		}
+	}
+
+	// A nil map must be safe.
+	jobs := []reportJob{{Job: "j", Verdict: "BROKEN"}}
+	markRegressions(jobs, nil)
+	if jobs[0].Regressed {
+		t.Error("nil previous map must not mark anything")
 	}
 }
