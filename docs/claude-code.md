@@ -66,14 +66,16 @@ stays offline and never shells out to `claude`:
 
 ## MCP server
 
-`whyfail mcp` is a stdio MCP server exposing two typed tools — useful when a client
+`whyfail mcp` is a stdio MCP server exposing typed tools — useful when a client
 would rather call a function than be handed a rewritten shell command:
 
-| Tool | Argument | Returns |
+| Tool | Arguments | Returns |
 |---|---|---|
 | `prow_run` | `url` — a Prow view URL or `gs://` reference | the run digest |
 | `prow_job` | `job` — a job name | health over retained history |
 | `prow_pr` | `pr` — a GitHub PR URL | every failing check on the head commit, with job health (needs `gh`) |
+| `prow_search` | `query` — a regex; `max_age` — search window (default `48h`) | how often a signature appears on search.ci |
+| `prow_log` | `url`, `step`; `tail` (default 120), `grep` | a bounded view of a step's build log |
 
 Register it with `whyfail init --mcp`, or by hand:
 

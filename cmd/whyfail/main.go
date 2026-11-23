@@ -477,33 +477,13 @@ func newLogCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-
-			var out string
-			printed := 0
-			if re != nil {
-				selected, total, kept := grepLog(lines, re, contextLines, tail)
-				printed = len(selected)
-				out = strings.Join(selected, "\n")
-				if out != "" {
-					out += "\n"
-				}
-				if further := total - kept; further > 0 {
-					out += fmt.Sprintf("… %d further matches\n", further)
-				}
-			} else {
-				if tail > 0 && len(lines) > tail {
-					lines = lines[len(lines)-tail:]
-				}
-				out = strings.Join(lines, "\n") + "\n"
-				printed = len(lines)
-			}
+			doc := logDocument(target, data, tail, re, contextLines)
 
 			var buf bytes.Buffer
 			if g.jsonOut {
-				writeJSON(&buf, logOut{Schema: api.SchemaV1, Artifact: target, Lines: printed, Text: out})
+				writeJSON(&buf, doc)
 			} else {
-				buf.WriteString(out)
+				buf.WriteString(doc.Text)
 			}
 			g.emit(&buf, stats.Record{Cmd: "log", Target: target, Repo: prow.Repo(ref.ObjectPath)}, c, start)
 			return nil
@@ -513,6 +493,33 @@ func newLogCmd(g *globals) *cobra.Command {
 	cmd.Flags().StringVar(&grep, "grep", "", "print only lines matching this regular expression")
 	cmd.Flags().IntVar(&contextLines, "context", 0, "lines of context around each --grep match")
 	return cmd
+}
+
+// logDocument selects the requested lines from a step log and wraps them in the
+// document both `whyfail log` and the MCP prow_log tool return, so the two
+// cannot drift.
+func logDocument(target string, data []byte, tail int, re *regexp.Regexp, contextLines int) logOut {
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	var out string
+	printed := 0
+	if re != nil {
+		selected, total, kept := grepLog(lines, re, contextLines, tail)
+		printed = len(selected)
+		out = strings.Join(selected, "\n")
+		if out != "" {
+			out += "\n"
+		}
+		if further := total - kept; further > 0 {
+			out += fmt.Sprintf("… %d further matches\n", further)
+		}
+	} else {
+		if tail > 0 && len(lines) > tail {
+			lines = lines[len(lines)-tail:]
+		}
+		out = strings.Join(lines, "\n") + "\n"
+		printed = len(lines)
+	}
+	return logOut{Schema: api.SchemaV1, Artifact: target, Lines: printed, Text: out}
 }
 
 // grepLog selects the lines matching re, expands each by context lines on either
@@ -1340,16 +1347,20 @@ type rpcReq struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
+// mcpTools is the tool catalogue, named so a test can assert the list a client
+// sees. Keep each inputSchema in step with the arguments mcpCallWith reads.
+var mcpTools = []map[string]any{
+	{"name": "prow_run", "description": "Digest of a Prow job run", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}}, "required": []string{"url"}}},
+	{"name": "prow_job", "description": "Health of a Prow job over retained history", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"job": map[string]any{"type": "string"}}, "required": []string{"job"}}},
+	{"name": "prow_pr", "description": "Health of every failing check on a pull request's head commit", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"pr": map[string]any{"type": "string"}}, "required": []string{"pr"}}},
+	{"name": "prow_search", "description": "Count matching runs on search.ci for a regular expression", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}, "max_age": map[string]any{"type": "string", "description": "search window, default 48h"}}, "required": []string{"query"}}},
+	{"name": "prow_log", "description": "Bounded view of a step's build log", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "step": map[string]any{"type": "string"}, "tail": map[string]any{"type": "integer", "description": "trailing lines or matches, default 120"}, "grep": map[string]any{"type": "string"}}, "required": []string{"url", "step"}}},
+}
+
 func serveMCP(g *globals) error {
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
 	enc := json.NewEncoder(os.Stdout)
-
-	tools := []map[string]any{
-		{"name": "prow_run", "description": "Digest of a Prow job run", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}}, "required": []string{"url"}}},
-		{"name": "prow_job", "description": "Health of a Prow job over retained history", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"job": map[string]any{"type": "string"}}, "required": []string{"job"}}},
-		{"name": "prow_pr", "description": "Health of every failing check on a pull request's head commit", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"pr": map[string]any{"type": "string"}}, "required": []string{"pr"}}},
-	}
 
 	for sc.Scan() {
 		line := sc.Bytes()
@@ -1369,7 +1380,7 @@ func serveMCP(g *globals) error {
 				"serverInfo":      map[string]any{"name": "whyfail", "version": version},
 			}
 		case "tools/list":
-			resp["result"] = map[string]any{"tools": tools}
+			resp["result"] = map[string]any{"tools": mcpTools}
 		case "tools/call":
 			var p struct {
 				Name      string         `json:"name"`
@@ -1405,12 +1416,17 @@ func serveMCP(g *globals) error {
 	return sc.Err()
 }
 
-func mcpCall(g *globals, name string, args map[string]any) (text string, err error) {
+func mcpCall(g *globals, name string, args map[string]any) (string, error) {
 	// The bound is per tool call, not around serveMCP: the server is long-lived.
 	ctx, cancel := g.ctx()
 	defer cancel()
+	return mcpCallWith(ctx, g, newClient(g), name, args)
+}
+
+// mcpCallWith is mcpCall with the context and client supplied, so a test can
+// drive a tool against the recorded corpus instead of the public bucket.
+func mcpCallWith(ctx context.Context, g *globals, c *gcs.Client, name string, args map[string]any) (text string, err error) {
 	start := time.Now()
-	c := newClient(g)
 	// An agent looping over failing checks is the highest-volume path through
 	// the tool, so every call is recorded like a CLI command. The record goes to
 	// the stats file, never to stdout, which is the JSON-RPC transport here. A
@@ -1457,8 +1473,53 @@ func mcpCall(g *globals, name string, args map[string]any) (text string, err err
 		}
 		b, _ := json.Marshal(doc)
 		return string(b), nil
+	case "prow_search":
+		query, _ := args["query"].(string)
+		if query == "" {
+			return "", fmt.Errorf("prow_search needs a non-empty query")
+		}
+		maxAge, _ := args["max_age"].(string)
+		res, err := enrich.SearchCI(ctx, c.HTTP, query, maxAge)
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(res)
+		return string(b), nil
+	case "prow_log":
+		raw, _ := args["url"].(string)
+		step, _ := args["step"].(string)
+		ref, err := prow.ParseRef(raw)
+		if err != nil {
+			return "", err
+		}
+		if step == "" {
+			return "", fmt.Errorf("prow_log needs a step")
+		}
+		grep, _ := args["grep"].(string)
+		var re *regexp.Regexp
+		if grep != "" {
+			re, err = regexp.Compile(grep)
+			if err != nil {
+				return "", fmt.Errorf("invalid grep pattern: %w", err)
+			}
+		}
+		target, data, err := resolveStepLog(ctx, c, ref.Bucket, ref.ObjectPath, step)
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(logDocument(target, data, intArg(args, "tail", 120), re, 0))
+		return string(b), nil
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
+}
+
+// intArg reads an optional integer argument, which JSON-RPC decodes as a float,
+// falling back to def when it is absent or not positive.
+func intArg(args map[string]any, key string, def int) int {
+	if v, ok := args[key].(float64); ok && v > 0 {
+		return int(v)
+	}
+	return def
 }
 
 // mcpTarget names what a tool call was aimed at, so its record reads without
@@ -1474,7 +1535,7 @@ func mcpRepo(name string, args map[string]any) string {
 		}
 		return ""
 	}
-	if name != "prow_run" {
+	if name != "prow_run" && name != "prow_log" {
 		return ""
 	}
 	s, _ := args["url"].(string)
@@ -1495,6 +1556,12 @@ func mcpTarget(name string, args map[string]any) string {
 		return s
 	case "prow_pr":
 		s, _ := args["pr"].(string)
+		return s
+	case "prow_search":
+		s, _ := args["query"].(string)
+		return s
+	case "prow_log":
+		s, _ := args["url"].(string)
 		return s
 	}
 	return ""
