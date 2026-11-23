@@ -52,6 +52,8 @@ h1 { margin: 0 0 .25rem; font-size: 1.6rem; letter-spacing: -.01em; }
   font-variant-numeric: tabular-nums;
 }
 .chip b { font-weight: 600; }
+.chip.newly-broken { color: var(--broken); }
+.chip.newly-broken b { font-weight: 700; }
 
 .search { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; color: var(--muted); }
 .search input {
@@ -92,6 +94,8 @@ td.num, th.num { text-align: right; }
 .v-degraded { color: var(--degraded); }
 .v-healthy { color: var(--healthy); }
 .v-unknown { color: var(--unknown); }
+
+.regressed { margin-left: .4rem; font-size: .72rem; font-weight: 500; color: var(--broken); }
 
 tr.broken td:first-child { box-shadow: inset 3px 0 0 var(--broken); }
 tr.flaky td:first-child { box-shadow: inset 3px 0 0 var(--flaky); }

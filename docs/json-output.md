@@ -23,6 +23,7 @@ existing ones keep their meaning.
 | `search` | `schema`, `query`, `matches`, `jobs`, `known_bug` |
 | `gain` | `schema`, `since`, `until`, `totals`, `groups`, `top_saves`, `verdicts` |
 | `pr` | `schema`, `pr`, `title`, `sha`, `failing[]` — each card is `check`, `job`, `prow`, `health`, `health_error`; `warning` appears when the lookup as a whole failed |
+| `report` | `schema`, `kind`, `generated_at`, `window`, `bucket`, `jobs[]` — each row carries `previous_verdict` and `regressed` when `--history` has an earlier point |
 | `init` | `schema`, `scope`, `mode`, `dry_run`, `from`, `settings`, `steps[]`, `ok` |
 
 `doctor` has no JSON form; it prints its checklist as text.

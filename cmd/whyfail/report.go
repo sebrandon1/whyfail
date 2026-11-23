@@ -52,6 +52,11 @@ type reportJob struct {
 	LastPassAt   *time.Time `json:"last_pass_at"`
 	DistinctPRs  int        `json:"distinct_prs_failing"`
 	URL          string     `json:"url"`
+	// PreviousVerdict and Regressed compare today's row with the newest earlier
+	// point in the history file. Both are omitted without --history or an
+	// earlier point for the job.
+	PreviousVerdict health.Verdict `json:"previous_verdict,omitempty"`
+	Regressed       bool           `json:"regressed,omitempty"`
 	// Error is set when the lookup itself failed, so a transient bucket error
 	// does not silently look like a job that nobody has run.
 	Error string `json:"error,omitempty"`
@@ -100,6 +105,17 @@ func newReportCmd(g *globals) *cobra.Command {
 			if duplicates > 0 {
 				fmt.Fprintf(os.Stderr, "whyfail report: ignored %d duplicate job name(s) in %s\n", duplicates, jobsFile)
 			}
+			// Load the published history before collecting, so each row can say
+			// whether it broke since the last point.
+			today := time.Now().UTC().Format("2006-01-02")
+			var previous map[string]health.Verdict
+			if historyFile != "" {
+				h, err := loadHistory(historyFile)
+				if err != nil {
+					return err
+				}
+				previous = previousVerdicts(h, today)
+			}
 			ctx, cancel := g.ctx()
 			defer cancel()
 			defer func() { err = g.timeoutError(cmd.CommandPath(), err) }()
@@ -146,6 +162,7 @@ func newReportCmd(g *globals) *cobra.Command {
 				}
 				return nil
 			})
+			markRegressions(jobs, previous)
 			sortReportJobs(jobs)
 
 			doc := reportOut{
@@ -254,6 +271,11 @@ func sortReportJobs(jobs []reportJob) {
 		if a, b := verdictRank(jobs[i].Verdict), verdictRank(jobs[j].Verdict); a != b {
 			return a < b
 		}
+		// Within a severity tier, something that broke since yesterday is the
+		// more urgent row.
+		if jobs[i].Regressed != jobs[j].Regressed {
+			return jobs[i].Regressed
+		}
 		if jobs[i].Fail != jobs[j].Fail {
 			return jobs[i].Fail > jobs[j].Fail
 		}
@@ -261,17 +283,75 @@ func sortReportJobs(jobs []reportJob) {
 	})
 }
 
+// loadHistory loads the published history. A missing file is the first day, not
+// an error; an unreadable or corrupt one is.
+func loadHistory(path string) (*historyOut, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read history %s: %w", path, err)
+	}
+	h := &historyOut{}
+	if err := json.Unmarshal(data, h); err != nil {
+		return nil, fmt.Errorf("read history %s: %w", path, err)
+	}
+	return h, nil
+}
+
+// previousVerdicts maps each job to its verdict at the newest point strictly
+// before today. A same-day re-run therefore compares against the day before,
+// not against its own earlier attempt.
+func previousVerdicts(h *historyOut, today string) map[string]health.Verdict {
+	if h == nil {
+		return nil
+	}
+	var latest *historyPoint
+	for i := range h.Points {
+		p := &h.Points[i]
+		if p.Date >= today {
+			continue
+		}
+		if latest == nil || p.Date > latest.Date {
+			latest = p
+		}
+	}
+	if latest == nil {
+		return nil
+	}
+	out := make(map[string]health.Verdict, len(latest.Jobs))
+	for job, j := range latest.Jobs {
+		out[job] = j.Verdict
+	}
+	return out
+}
+
+// markRegressions records each job's previous verdict and whether today's is
+// worse. UNKNOWN on either side is not compared: it means there was no signal,
+// not that the job improved or broke. Ranks run worst-first, so a smaller rank
+// is the worse verdict.
+func markRegressions(jobs []reportJob, previous map[string]health.Verdict) {
+	for i := range jobs {
+		prev, ok := previous[jobs[i].Job]
+		if !ok || prev == "" || prev == health.VerdictUnknown || jobs[i].Verdict == health.VerdictUnknown {
+			continue
+		}
+		jobs[i].PreviousVerdict = prev
+		jobs[i].Regressed = verdictRank(jobs[i].Verdict) < verdictRank(prev)
+	}
+}
+
 // appendHistory writes today's point into the history file, replacing an earlier
 // point for the same day so a re-run is idempotent, and drops points older than
 // keep days.
 func appendHistory(path string, at time.Time, jobs []reportJob, keep int) error {
-	h := &historyOut{Schema: api.SchemaV1}
-	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, h); err != nil {
-			return fmt.Errorf("read history %s: %w", path, err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read history %s: %w", path, err)
+	h, err := loadHistory(path)
+	if err != nil {
+		return err
+	}
+	if h == nil {
+		h = &historyOut{}
 	}
 	h.Schema = api.SchemaV1
 
