@@ -126,6 +126,26 @@ func TestCollectMissingFinishedIsNotFailure(t *testing.T) {
 	}
 }
 
+func TestCollectNormalisesResultCase(t *testing.T) {
+	// Prow has recorded results in lower case; a run must be classified by its
+	// value, not its spelling, or it silently becomes MISSING.
+	objects := map[string]string{
+		"logs/job/400/finished.json": `{"result":"aborted"}`,
+		"logs/job/401/finished.json": `{"result":"failure"}`,
+		"logs/job/402/finished.json": `{"result":"SUCCESS"}`,
+	}
+	prefixes := map[string][]string{"logs/job/": {"logs/job/400/", "logs/job/401/", "logs/job/402/"}}
+	c := fakeClient(t, objects, prefixes)
+
+	s, err := Collect(context.Background(), c, "bkt", "job", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Abort != 1 || s.Fail != 1 || s.Pass != 1 || s.Missing != 0 {
+		t.Fatalf("lowercase results must classify by value, not case: %+v", s)
+	}
+}
+
 func build(results ...string) []RunResult {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	out := make([]RunResult, 0, len(results))

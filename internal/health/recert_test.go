@@ -31,8 +31,10 @@ func TestRecertHistory(t *testing.T) {
 	if sum.Pass+sum.Fail+sum.Abort+sum.Missing != sum.Runs {
 		t.Errorf("counts do not add up: %+v", sum)
 	}
-	if sum.Pass != 89 || sum.Fail != 21 || sum.Abort != 28 || sum.Missing != 1 {
-		t.Errorf("counts = %d/%d/%d/%d, want 89/21/28/1", sum.Pass, sum.Fail, sum.Abort, sum.Missing)
+	// The corpus includes a run whose finished.json says "aborted" in lower
+	// case; it must be classified by value, not spelling, and land in Abort.
+	if sum.Pass != 89 || sum.Fail != 21 || sum.Abort != 29 || sum.Missing != 0 {
+		t.Errorf("counts = %d/%d/%d/%d, want 89/21/29/0", sum.Pass, sum.Fail, sum.Abort, sum.Missing)
 	}
 	if sum.Verdict != VerdictFlaky {
 		t.Errorf("verdict = %q, want FLAKY", sum.Verdict)
