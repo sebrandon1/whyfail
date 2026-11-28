@@ -1,0 +1,555 @@
+{
+  "schema": "whyfail/v1",
+  "points": [
+    {
+      "date": "2026-11-19",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.36363636363636365,
+          "runs": 53
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 33
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 32
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 33
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.5365853658536586,
+          "runs": 50
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.14285714285714285,
+          "runs": 60
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "DEGRADED",
+          "pass_rate": 0.9230769230769231,
+          "runs": 35
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.7692307692307693,
+          "runs": 35
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 0.9818181818181818,
+          "runs": 59
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.6666666666666666,
+          "runs": 39
+        }
+      }
+    },
+    {
+      "date": "2026-11-20",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.40425531914893614,
+          "runs": 58
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 35
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.5121951219512195,
+          "runs": 51
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.13725490196078433,
+          "runs": 65
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "DEGRADED",
+          "pass_rate": 0.9310344827586207,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.7931034482758621,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 0.9824561403508771,
+          "runs": 61
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.53125,
+          "runs": 43
+        }
+      }
+    },
+    {
+      "date": "2026-11-21",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.40425531914893614,
+          "runs": 58
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 35
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.5365853658536586,
+          "runs": 50
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.13725490196078433,
+          "runs": 64
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "DEGRADED",
+          "pass_rate": 0.9310344827586207,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.7931034482758621,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 0.9818181818181818,
+          "runs": 59
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.47058823529411764,
+          "runs": 43
+        }
+      }
+    },
+    {
+      "date": "2026-11-22",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.40425531914893614,
+          "runs": 58
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 35
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.5365853658536586,
+          "runs": 50
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.13725490196078433,
+          "runs": 64
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "DEGRADED",
+          "pass_rate": 0.9310344827586207,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.7931034482758621,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 0.9818181818181818,
+          "runs": 59
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.47058823529411764,
+          "runs": 43
+        }
+      }
+    },
+    {
+      "date": "2026-11-23",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.40425531914893614,
+          "runs": 58
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 35
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.5365853658536586,
+          "runs": 50
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.16279069767441862,
+          "runs": 56
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "DEGRADED",
+          "pass_rate": 0.9310344827586207,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.7931034482758621,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 0.9818181818181818,
+          "runs": 59
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.40625,
+          "runs": 43
+        }
+      }
+    },
+    {
+      "date": "2026-11-24",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.40425531914893614,
+          "runs": 58
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 35
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 36
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.5365853658536586,
+          "runs": 50
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.13333333333333333,
+          "runs": 57
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "DEGRADED",
+          "pass_rate": 0.9310344827586207,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.7931034482758621,
+          "runs": 38
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 56
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.43243243243243246,
+          "runs": 46
+        }
+      }
+    },
+    {
+      "date": "2026-11-25",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.3902439024390244,
+          "runs": 53
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 34
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 33
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 34
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.48717948717948717,
+          "runs": 49
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.125,
+          "runs": 65
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.8333333333333334,
+          "runs": 34
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.7083333333333334,
+          "runs": 34
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 60
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.375,
+          "runs": 50
+        }
+      }
+    },
+    {
+      "date": "2026-11-26",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.3902439024390244,
+          "runs": 53
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 34
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 33
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 34
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.48717948717948717,
+          "runs": 49
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.12244897959183673,
+          "runs": 62
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.8260869565217391,
+          "runs": 32
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.6956521739130435,
+          "runs": 32
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 60
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.358974358974359,
+          "runs": 48
+        }
+      }
+    },
+    {
+      "date": "2026-11-27",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.3902439024390244,
+          "runs": 53
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 34
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 33
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 34
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.48717948717948717,
+          "runs": 49
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.12244897959183673,
+          "runs": 62
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.8260869565217391,
+          "runs": 32
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.6956521739130435,
+          "runs": 32
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 60
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.358974358974359,
+          "runs": 48
+        }
+      }
+    },
+    {
+      "date": "2026-11-28",
+      "jobs": {
+        "pull-ci-rh-ecosystem-edge-recert-main-baremetalds-sno-recert-cluster-rename": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.358974358974359,
+          "runs": 51
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-check": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 32
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-clippy": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 31
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-cargo-test": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 32
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-parallel": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.43243243243243246,
+          "runs": 47
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-e2e-aws-ovn-single-node-recert-serial": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.11764705882352941,
+          "runs": 64
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibi-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.8333333333333334,
+          "runs": 33
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ibu-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.6666666666666666,
+          "runs": 33
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-images": {
+          "verdict": "HEALTHY",
+          "pass_rate": 1,
+          "runs": 55
+        },
+        "pull-ci-rh-ecosystem-edge-recert-main-ipc-e2e-flow": {
+          "verdict": "FLAKY",
+          "pass_rate": 0.35,
+          "runs": 49
+        }
+      }
+    }
+  ]
+}

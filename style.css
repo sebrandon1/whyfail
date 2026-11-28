@@ -1,0 +1,117 @@
+/* A board that lives in a dashboard tab: system colours, no webfonts, no
+   network beyond the two JSON files it loads. */
+:root {
+  --bg: #fbfbfa;
+  --fg: #1c1c1c;
+  --muted: #6b6b6b;
+  --line: #e3e3df;
+  --broken: #b3261e;
+  --flaky: #a15c00;
+  --degraded: #7a6a00;
+  --healthy: #1f6b3a;
+  --unknown: #6b6b6b;
+  --chip: #f0efec;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16161a;
+    --fg: #e8e8e6;
+    --muted: #a0a0a0;
+    --line: #2d2d33;
+    --broken: #ff7b72;
+    --flaky: #e3a008;
+    --degraded: #d4c559;
+    --healthy: #6fcf97;
+    --unknown: #9a9a9a;
+    --chip: #22222a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 2rem 1rem 4rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+header, main, footer { max-width: 1100px; margin: 0 auto; }
+
+h1 { margin: 0 0 .25rem; font-size: 1.6rem; letter-spacing: -.01em; }
+.sub { margin: 0 0 1rem; color: var(--muted); font-size: .9rem; }
+
+.chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.5rem; }
+.chip {
+  background: var(--chip);
+  border-radius: 999px;
+  padding: .2rem .7rem;
+  font-size: .85rem;
+  font-variant-numeric: tabular-nums;
+}
+.chip b { font-weight: 600; }
+.chip.newly-broken { color: var(--broken); }
+.chip.newly-broken b { font-weight: 700; }
+
+.search { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; color: var(--muted); }
+.search input {
+  flex: 1;
+  padding: .45rem .6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+thead th {
+  text-align: left;
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding: .4rem .5rem;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+}
+tbody td { padding: .45rem .5rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tbody tr:hover { background: var(--chip); }
+td.num, th.num { text-align: right; }
+
+.job { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; }
+.job a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--line); }
+.job a:hover { border-bottom-color: currentColor; }
+.repo { color: var(--muted); font-size: .82rem; white-space: nowrap; }
+
+.verdict { font-weight: 600; font-size: .82rem; letter-spacing: .02em; }
+.v-broken { color: var(--broken); }
+.v-flaky { color: var(--flaky); }
+.v-degraded { color: var(--degraded); }
+.v-healthy { color: var(--healthy); }
+.v-unknown { color: var(--unknown); }
+
+.regressed { margin-left: .4rem; font-size: .72rem; font-weight: 500; color: var(--broken); }
+
+tr.broken td:first-child { box-shadow: inset 3px 0 0 var(--broken); }
+tr.flaky td:first-child { box-shadow: inset 3px 0 0 var(--flaky); }
+
+.spark { width: 80px; height: 20px; display: block; }
+.spark polyline { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.spark .area { fill: var(--chip); stroke: none; }
+
+tr.err td { color: var(--muted); font-style: italic; }
+
+.empty { color: var(--muted); margin-top: 1rem; }
+
+footer { margin-top: 3rem; color: var(--muted); font-size: .85rem; }
+footer a { color: inherit; }
+
+@media (max-width: 700px) {
+  td.repo, td.runs, td.streak, td.prs { display: none; }
+  thead th:nth-child(2), thead th:nth-child(6), thead th:nth-child(7), thead th:nth-child(8) { display: none; }
+}
